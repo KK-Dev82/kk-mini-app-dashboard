@@ -3,7 +3,6 @@
 import {
   Squares2X2Icon,
   ClipboardDocumentListIcon,
-  UsersIcon,
   CalendarDaysIcon,
   UserCircleIcon,
 } from "@heroicons/react/24/outline";
@@ -13,28 +12,26 @@ import { usePathname } from "next/navigation";
 
 const navItems = [
   { href: "/home", label: "Home", icon: Squares2X2Icon },
-  { href: "/projects", label: "Projects", icon: ClipboardDocumentListIcon },
-  { href: "/teams", label: "Teams", icon: UsersIcon },
+  { href: "/task", label: "Task", icon: ClipboardDocumentListIcon },
   { href: "/leave", label: "Leave", icon: CalendarDaysIcon },
-  { href: "/profile", label: "Profile", icon: UserCircleIcon },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
+  const isProfileActive = pathname === "/profile";
 
   return (
-    <header className="sticky top-0 z-30 w-full border-b bg-white/90 backdrop-blur">
-      <div className="mx-auto max-w-7xl px-8 h-16 flex items-center">
-        {/* โลโก้ฝั่งซ้าย (ไม่ชิดขอบเพราะมี px-8 + max-w-7xl) */}
+    <header className="sticky top-0 z-30 bg-white shadow-[0_2px_6px_rgba(0,0,0,0.2)]">
+      <div className="h-16 flex items-center px-8">
+        {/* ซ้าย: โลโก้ */}
         <div className="flex items-center gap-3">
           <Squares2X2Icon className="h-7 w-7 text-blue-600" />
-          <span className="text-lg font-semibold text-slate-700">
-            WorkFlow
-          </span>
+          <span className="text-lg font-semibold text-slate-700">WorkFlow</span>
         </div>
 
-        {/* พื้นที่รวบเมนู: เริ่มจากกลาง ๆ แล้วไล่ไปทางขวา */}
-        <div className="flex-1 flex justify-center">
+        {/* ขวา: เมนู + โปรไฟล์ (ชิดขวาสุด) */}
+        <div className="flex-1 flex items-center justify-end gap-8">
+          {/* เมนูหลัก */}
           <nav className="flex items-center gap-10">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -71,6 +68,20 @@ export default function Navbar() {
               );
             })}
           </nav>
+
+          {/* ปุ่มโปรไฟล์ */}
+          <Link
+            href="/profile"
+            className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm transition
+              ${
+                isProfileActive
+                  ? "border-blue-500 bg-blue-50 text-blue-700"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:border-blue-400 hover:bg-blue-50"
+              }`}
+          >
+            <UserCircleIcon className="h-5 w-5 text-slate-500" />
+            <span>Profile</span>
+          </Link>
         </div>
       </div>
     </header>
