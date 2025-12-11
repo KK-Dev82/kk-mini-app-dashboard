@@ -12,8 +12,8 @@ import { usePathname } from "next/navigation";
 
 const navItems = [
   { href: "/home", label: "Home", icon: Squares2X2Icon },
-  { href: "/task", label: "Task", icon: ClipboardDocumentListIcon },
-  { href: "/leave", label: "Leave", icon: CalendarDaysIcon },
+  { href: "/project", label: "Project", icon: ClipboardDocumentListIcon },
+  { href: "/history", label: "History", icon: CalendarDaysIcon },
 ];
 
 export default function Navbar() {

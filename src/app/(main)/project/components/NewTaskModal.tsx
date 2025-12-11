@@ -1,20 +1,14 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import {
-  XMarkIcon,
-  CalendarDaysIcon,
-  ChevronUpDownIcon,
-  CheckIcon,
-} from "@heroicons/react/24/outline";
-import type { TaskStatus } from "../../../lib/tasksService";
+import { XMarkIcon, CalendarDaysIcon } from "@heroicons/react/24/outline";
 
 export type NewTaskPayload = {
   name: string;
+  tagName: string;
   description: string;
   startDate: string;
   endDate: string;
-  status: TaskStatus;
 };
 
 type Props = {
@@ -23,15 +17,12 @@ type Props = {
   onCreate?: (data: NewTaskPayload) => void;
 };
 
-const STATUS_OPTIONS: TaskStatus[] = ["Active", "On Hold", "Completed"];
-
 export default function NewTaskModal({ open, onClose, onCreate }: Props) {
   const [name, setName] = useState("");
+  const [tagName, setTagName] = useState("");
   const [description, setDescription] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [status, setStatus] = useState<TaskStatus>("Active");
-  const [statusOpen, setStatusOpen] = useState(false); // สำหรับเปิด/ปิด dropdown
 
   if (!open) return null;
 
@@ -40,22 +31,21 @@ export default function NewTaskModal({ open, onClose, onCreate }: Props) {
 
     const payload: NewTaskPayload = {
       name,
+      tagName,
       description,
       startDate,
       endDate,
-      status,
     };
 
     onCreate?.(payload);
     onClose();
 
-    // เคลียร์ฟอร์ม (เผื่อเปิดใช้รอบต่อไป)
+    // เคลียร์ฟอร์มรอบต่อไป
     setName("");
+    setTagName("");
     setDescription("");
     setStartDate("");
     setEndDate("");
-    setStatus("Active");
-    setStatusOpen(false);
   };
 
   return (
@@ -64,7 +54,7 @@ export default function NewTaskModal({ open, onClose, onCreate }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-900">
-            Create New Task
+            Create New Project
           </h2>
           <button
             type="button"
@@ -76,19 +66,34 @@ export default function NewTaskModal({ open, onClose, onCreate }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Task Name */}
+          {/* Project Name */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">
-              Task Name
+              Project Name
             </label>
             <input
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none 
                          focus:border-blue-500 focus:ring-1 focus:ring-blue-500
                          placeholder:text-black/50"
-              placeholder="Enter task name"
+              placeholder="Enter project name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+            />
+          </div>
+
+          {/* Tag Name */}
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-slate-700">
+              Tag Name
+            </label>
+            <input
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none 
+                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500
+                         placeholder:text-black/50"
+              placeholder="Enter tag name"
+              value={tagName}
+              onChange={(e) => setTagName(e.target.value)}
             />
           </div>
 
@@ -101,7 +106,7 @@ export default function NewTaskModal({ open, onClose, onCreate }: Props) {
               className="w-full min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none 
                          focus:border-blue-500 focus:ring-1 focus:ring-blue-500
                          placeholder:text-black/50"
-              placeholder="Enter task description"
+              placeholder="Enter project description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
@@ -139,66 +144,6 @@ export default function NewTaskModal({ open, onClose, onCreate }: Props) {
                 />
                 <CalendarDaysIcon className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
               </div>
-            </div>
-          </div>
-
-          {/* Status (custom dropdown) */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700">
-              Status
-            </label>
-
-            <div
-              className="relative"
-              tabIndex={-1}
-              onBlur={(e) => {
-                // ถ้า blur ออกนอก component นี้ ให้ปิด dropdown
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setStatusOpen(false);
-                }
-              }}
-            >
-              {/* ปุ่มหลัก */}
-              <button
-                type="button"
-                onClick={() => setStatusOpen((open) => !open)}
-                className="flex w-full items-center justify-between rounded-xl border border-slate-200
-                           bg-white px-3 py-2 text-left text-sm text-slate-900
-                           outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              >
-                <span>{status}</span>
-                <ChevronUpDownIcon className="h-4 w-4 text-slate-400" />
-              </button>
-
-              {/* Dropdown list */}
-              {statusOpen && (
-                <div className="absolute z-10 mt-1 w-full rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-                  {STATUS_OPTIONS.map((opt) => {
-                    const isActive = opt === status;
-                    return (
-                      <button
-                        type="button"
-                        key={opt}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-800 text-left
-                                   hover:bg-slate-50 ${
-                                     isActive ? "bg-slate-50" : ""
-                                   }`}
-                        onClick={() => {
-                          setStatus(opt);
-                          setStatusOpen(false);
-                        }}
-                      >
-                        <span className="w-4">
-                          {isActive && (
-                            <CheckIcon className="h-4 w-4 text-blue-600" />
-                          )}
-                        </span>
-                        <span>{opt}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           </div>
 
