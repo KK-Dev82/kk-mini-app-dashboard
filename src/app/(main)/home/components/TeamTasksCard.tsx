@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { CheckCircleIcon } from "@heroicons/react/24/outline";
 import type { TeamTasks } from "../../../lib/dashboardService";
 import TaskCard from "../../component/TaskCard";
@@ -11,6 +12,15 @@ type Props = {
 const MAX_TASKS = 10;
 
 export default function TeamTasksCard({ teamTasks }: Props) {
+  const router = useRouter();
+
+  // ✅ เปลี่ยน path ให้ตรงหน้า project ของคุณ
+  // ตัวอย่าง:
+  // - "/project"
+  // - "/projects"
+  // - `/project?projectId=${teamTasks.projectId}`
+  const TARGET_PATH = "/project";
+
   const { summary, tasks } = teamTasks;
 
   // จำกัดจำนวนงานที่เอามาใช้บน dashboard
@@ -34,7 +44,11 @@ export default function TeamTasksCard({ teamTasks }: Props) {
           <h2 className="text-sm font-semibold text-slate-800">Team Tasks</h2>
         </div>
 
-        <button className="text-xs font-medium text-blue-600 hover:text-blue-700">
+        <button
+          type="button"
+          onClick={() => router.push(TARGET_PATH)}
+          className="text-xs font-medium text-blue-600 hover:text-blue-700"
+        >
           View All
         </button>
       </div>
@@ -64,9 +78,7 @@ export default function TeamTasksCard({ teamTasks }: Props) {
             In Progress
           </div>
           {inProgressTasks.length === 0 && (
-            <div className="text-xs text-slate-400">
-              No tasks in progress.
-            </div>
+            <div className="text-xs text-slate-400">No tasks in progress.</div>
           )}
           {inProgressTasks.map((task) => (
             <TaskCard key={task.id} task={task} />
@@ -75,9 +87,7 @@ export default function TeamTasksCard({ teamTasks }: Props) {
 
         {/* Overdue column */}
         <div className="space-y-3">
-          <div className="text-xs font-semibold text-rose-500 mb-1">
-            Overdue
-          </div>
+          <div className="text-xs font-semibold text-rose-500 mb-1">Overdue</div>
           {overdueTasks.length === 0 && (
             <div className="text-xs text-slate-400">No overdue tasks.</div>
           )}

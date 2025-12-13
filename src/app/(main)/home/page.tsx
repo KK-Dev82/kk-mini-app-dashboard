@@ -8,8 +8,8 @@ export default async function HomePage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 space-y-6">
-      <AttendanceSummaryCard summary={data.attendance} />
-      <PendingLeaveCard items={data.pendingLeaves} />
+      <AttendanceSummaryCard />
+      <PendingLeaveCard />
       <TeamTasksCard teamTasks={data.teamTasks} />
     </div>
   );

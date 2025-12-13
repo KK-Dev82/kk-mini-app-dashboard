@@ -1,37 +1,46 @@
 // src/lib/apiClient.ts
-const getBaseUrl = () => {
-  // ถ้าตั้งค่า endpoint backend จริงไว้ ก็ใช้ค่านี้
-  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
-    return process.env.NEXT_PUBLIC_API_BASE_URL;
-  }
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-  // ถ้าไม่มี และตอนนี้รันบน server → ต้องใช้ absolute URL
-  if (typeof window === "undefined") {
-    // dev: ใช้ localhost ไปก่อน
-    return "http://localhost:3000";
-  }
+const isServer = typeof window === "undefined";
 
-  // ถ้าอยู่บน browser ใช้ relative path ได้
-  return "";
-};
+const BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  (isServer ? "http://localhost:3000" : "");
 
-const API_BASE_URL = getBaseUrl();
+const PREFIX = process.env.NEXT_PUBLIC_API_PREFIX ?? "";
 
-export async function apiGet<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${API_BASE_URL}${path}`;
+const joinUrl = (...parts: string[]) =>
+  parts
+    .filter(Boolean)
+    .map((p, i) => (i === 0 ? p.replace(/\/+$/, "") : p.replace(/^\/+/, "")))
+    .join("/");
+
+async function apiRequest<T>(
+  path: string,
+  method: HttpMethod,
+  body?: unknown
+) {
+  const url = joinUrl(BASE, PREFIX, path);
 
   const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
-    ...init,
   });
 
   if (!res.ok) {
-    throw new Error(`API GET ${path} failed with status ${res.status}`);
+    throw new Error(`API ${method} ${url} failed (${res.status})`);
   }
 
   return (await res.json()) as T;
 }
+
+export const apiGet = <T>(path: string) =>
+  apiRequest<T>(path, "GET");
+
+export const apiPost = <T>(path: string, body: unknown) =>
+  apiRequest<T>(path, "POST", body);
+
+export const apiPut = <T>(path: string, body: unknown) =>
+  apiRequest<T>(path, "PUT", body);

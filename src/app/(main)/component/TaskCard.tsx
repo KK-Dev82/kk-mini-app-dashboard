@@ -1,4 +1,8 @@
 import type { TaskItem } from "../../lib/dashboardService";
+import {
+  UserIcon,
+  CalendarDaysIcon,
+} from "@heroicons/react/24/outline";
 
 type Props = {
   task: TaskItem;
@@ -88,8 +92,15 @@ export default function TaskCard({ task }: Props) {
 
       {/* Footer row: assignee + due date */}
       <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
-        <span>👤 {task.assignee}</span>
-        <span>📅 Due {task.dueDate}</span>
+        <span className="inline-flex items-center gap-1.5">
+          <UserIcon className="h-4 w-4 text-slate-400" />
+          {task.assignee}
+        </span>
+
+        <span className="inline-flex items-center gap-1.5">
+          <CalendarDaysIcon className="h-4 w-4 text-slate-400" />
+          Due {task.dueDate}
+        </span>
       </div>
     </div>
   );

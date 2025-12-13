@@ -1,6 +1,6 @@
 // src/app/api/tasks/route.ts
 import { NextResponse } from "next/server";
-import type { TaskProject } from "../../lib/tasksService";
+import type { TaskProject } from "../../lib/projectService";
 
 type TasksApiResponse = {
   items: TaskProject[];

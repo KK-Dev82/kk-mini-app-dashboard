@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import {
   fetchTasksOverview,
   type TasksOverview,
-} from "../../lib/tasksService";
+} from "../../lib/projectService";
 
-import TaskProjectCard from "./components/TaskProjectCard";
-import NewTaskModal, { type NewTaskPayload } from "./components/NewTaskModal";
+import TaskProjectCard from "./components/ProjectCard";
+import NewTaskModal, { type NewTaskPayload } from "./components/ProjectModal";
 
 export default function TaskPage() {
   const [data, setData] = useState<TasksOverview | null>(null);
