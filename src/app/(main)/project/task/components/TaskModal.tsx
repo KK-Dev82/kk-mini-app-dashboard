@@ -220,7 +220,7 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-1.5">
               <FieldLabel>Tag</FieldLabel>
-              <InputBase placeholder="Enter tag" value={tag} onChange={(e) => setTag(e.target.value)} />
+              <InputBase placeholder="Enter [ tag ]" value={tag} onChange={(e) => setTag(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <FieldLabel>ชื่อ Task</FieldLabel>

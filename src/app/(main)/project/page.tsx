@@ -2,25 +2,48 @@
 
 import { useEffect, useState } from "react";
 import {
-  fetchTasksOverview,
-  type TasksOverview,
+  fetchProjects,
+  createProject,
+  type ProjectsResponse,
+  type CreateProjectPayload,
 } from "../../lib/projectService";
 
-import TaskProjectCard from "./components/ProjectCard";
-import NewTaskModal, { type NewTaskPayload } from "./components/ProjectModal";
+import ProjectCard from "./components/ProjectCard";
+import ProjectModal, { type NewProjectPayload } from "./components/ProjectModal";
 
-export default function TaskPage() {
-  const [data, setData] = useState<TasksOverview | null>(null);
+export default function ProjectPage() {
+  const [data, setData] = useState<ProjectsResponse | null>(null);
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const load = () =>
+    fetchProjects()
+      .then(setData)
+      .catch((err) => console.error("Failed to load projects", err));
 
   useEffect(() => {
-    fetchTasksOverview()
-      .then(setData)
-      .catch((err) => console.error("Failed to load tasks", err));
+    load();
   }, []);
 
-  const handleCreate = (payload: NewTaskPayload) => {
-    console.log("NEW TASK:", payload);
+  const handleCreate = async (payload: NewProjectPayload) => {
+    try {
+      setSaving(true);
+
+      const body: CreateProjectPayload = {
+        name: payload.name,
+        description: payload.description,
+        key: payload.key,
+        trelloTag: payload.trelloTag,
+      };
+
+      await createProject(body);
+      await load();
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : "Create project failed");
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!data) return <div className="p-6 text-sm text-slate-500">Loading...</div>;
@@ -28,8 +51,6 @@ export default function TaskPage() {
   return (
     <>
       <div className="mx-auto max-w-5xl px-4 py-6 space-y-4">
-
-        {/* Header */}
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">Project</h1>
@@ -38,22 +59,22 @@ export default function TaskPage() {
 
           <button
             onClick={() => setOpen(true)}
-            className="inline-flex items-center rounded-full bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700 transition"
+            disabled={saving}
+            className="inline-flex items-center rounded-full bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700 transition disabled:opacity-60"
           >
             <span className="mr-1 text-base leading-none">＋</span>
             New Project
           </button>
         </div>
 
-        {/* Tasks List */}
         <div className="space-y-3">
           {data.items.map((project) => (
-            <TaskProjectCard key={project.id} project={project} />
+            <ProjectCard key={project.id} project={project} />
           ))}
         </div>
       </div>
 
-      <NewTaskModal
+      <ProjectModal
         open={open}
         onClose={() => setOpen(false)}
         onCreate={handleCreate}

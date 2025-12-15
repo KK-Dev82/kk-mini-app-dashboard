@@ -1,49 +1,53 @@
-// src/lib/tasksService.ts
-import { apiGet } from "./apiClient";
+// src/app/lib/projectService.ts
+import { apiGet, apiPost } from "./apiClient";
 
-export type TaskStatus = "Active" | "On Hold" | "Completed";
-
-export type TaskProject = {
-  id: number | string;
+/** shape ที่ backend /projects ส่งมา (ตาม swagger) */
+export type ProjectApi = {
+  id: string;
   name: string;
   description: string;
-  teamsCount: number;
-  status: TaskStatus;
-  startDate: string; // ISO string
-  endDate: string;   // ISO string
+  key: string;
+  trelloTag: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export type TasksStats = {
-  total: number;
-  active: number;
-  onHold: number;
-  completed: number;
+/** POST body (ไม่มี trelloBoardId) */
+export type CreateProjectPayload = {
+  name: string;
+  description: string;
+  key: string;
+  trelloTag: string;
 };
 
-export type TasksOverview = {
-  stats: TasksStats;
-  items: TaskProject[];
+/** ✅ UI/list ใช้ข้อมูลจริงเท่านั้น */
+export type ProjectListItem = Pick<ProjectApi, "id" | "name" | "description" | "key">;
+
+export type ProjectsResponse = {
+  items: ProjectListItem[];
 };
 
-// shape ที่ API ส่งจริง ๆ
-type TasksApiResponse = {
-  items: TaskProject[];
-};
-
-export async function fetchTasksOverview(): Promise<TasksOverview> {
-  const data = await apiGet<TasksApiResponse>("/api/tasks");
-
-  const active = data.items.filter((p) => p.status === "Active").length;
-  const onHold = data.items.filter((p) => p.status === "On Hold").length;
-  const completed = data.items.filter((p) => p.status === "Completed").length;
+/** ✅ GET /projects (list) */
+export async function fetchProjects(): Promise<ProjectsResponse> {
+  const projects = await apiGet<ProjectApi[]>("/projects");
 
   return {
-    stats: {
-      total: data.items.length,
-      active,
-      onHold,
-      completed,
-    },
-    items: data.items,
+    items: projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      key: p.key,
+    })),
   };
+}
+
+/** ✅ GET /projects/key/{key} */
+export async function fetchProjectByKey(key: string): Promise<ProjectApi> {
+  return apiGet<ProjectApi>(`/projects/key/${encodeURIComponent(key)}`);
+}
+
+/** ✅ POST /projects */
+export async function createProject(payload: CreateProjectPayload): Promise<ProjectApi> {
+  return apiPost<ProjectApi>("/projects", payload);
 }

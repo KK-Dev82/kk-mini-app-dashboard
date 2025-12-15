@@ -1,57 +1,51 @@
 "use client";
 
 import { useState, FormEvent } from "react";
-import { XMarkIcon, CalendarDaysIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon } from "@heroicons/react/24/outline";
 
-export type NewTaskPayload = {
+export type NewProjectPayload = {
   name: string;
-  tagName: string;
   description: string;
-  startDate: string;
-  endDate: string;
+  key: string;
+  trelloTag: string;
 };
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreate?: (data: NewTaskPayload) => void;
+  onCreate?: (data: NewProjectPayload) => void;
 };
 
-export default function NewTaskModal({ open, onClose, onCreate }: Props) {
+export default function ProjectModal({ open, onClose, onCreate }: Props) {
   const [name, setName] = useState("");
-  const [tagName, setTagName] = useState("");
   const [description, setDescription] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [key, setKey] = useState("");
+  const [trelloTag, setTrelloTag] = useState("");
 
   if (!open) return null;
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
 
-    const payload: NewTaskPayload = {
-      name,
-      tagName,
-      description,
-      startDate,
-      endDate,
+    const payload: NewProjectPayload = {
+      name: name.trim(),
+      description: description.trim(),
+      key: key.trim(),
+      trelloTag: trelloTag.trim(),
     };
 
     onCreate?.(payload);
     onClose();
 
-    // เคลียร์ฟอร์มรอบต่อไป
     setName("");
-    setTagName("");
     setDescription("");
-    setStartDate("");
-    setEndDate("");
+    setKey("");
+    setTrelloTag("");
   };
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
       <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl p-6 md:p-8">
-        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-900">
             Create New Project
@@ -66,88 +60,66 @@ export default function NewTaskModal({ open, onClose, onCreate }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Project Name */}
+          {/* name */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700">
-              Project Name
-            </label>
+            <label className="text-xs font-medium text-slate-700">Name</label>
             <input
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none 
-                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                         placeholder:text-black/50"
-              placeholder="Enter project name"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
+                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              placeholder="Mobile App Development"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
           </div>
 
-          {/* Tag Name */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700">
-              Tag Name
-            </label>
-            <input
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none 
-                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                         placeholder:text-black/50"
-              placeholder="Enter tag name"
-              value={tagName}
-              onChange={(e) => setTagName(e.target.value)}
-            />
-          </div>
-
-          {/* Description */}
+          {/* description */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">
               Description
             </label>
             <textarea
-              className="w-full min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none 
-                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-                         placeholder:text-black/50"
-              placeholder="Enter project description"
+              className="w-full min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
+                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              placeholder="A comprehensive mobile application for task management"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              required
             />
           </div>
 
-          {/* Dates */}
+          {/* key + trelloTag */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-700">
-                Start Date
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 pr-10 text-sm outline-none 
-                             focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-                <CalendarDaysIcon className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
-              </div>
+              <label className="text-xs font-medium text-slate-700">Key</label>
+              <input
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
+                           focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="MOBILE"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                required
+              />
+              <p className="text-[11px] text-slate-400">
+                ต้องไม่ซ้ำ (ซ้ำจะได้ 409)
+              </p>
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">
-                End Date
+                Trello Tag
               </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 pr-10 text-sm outline-none 
-                             focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-                <CalendarDaysIcon className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
-              </div>
+              <input
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
+                           focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                placeholder="MOBILE"
+                value={trelloTag}
+                onChange={(e) => setTrelloTag(e.target.value)}
+                required
+              />
             </div>
           </div>
 
-          {/* Footer buttons */}
           <div className="mt-4 flex justify-end gap-2">
             <button
               type="button"
