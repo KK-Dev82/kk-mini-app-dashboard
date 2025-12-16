@@ -2,6 +2,10 @@
 import Link from "next/link";
 import type { ProjectListItem } from "../../../lib/projectService";
 import {
+  projectStatusBadgeClass,
+  projectStatusLabelTH,
+} from "../../../lib/projectService";
+import {
   EllipsisHorizontalIcon,
   FolderIcon,
   CalendarDaysIcon,
@@ -15,8 +19,14 @@ function fmtShortTH(dateStr?: string | null) {
   if (!dateStr) return "";
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "numeric" });
+  return d.toLocaleDateString("th-TH", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
 }
+
 
 function dateRange(start?: string | null, end?: string | null) {
   const s = fmtShortTH(start);
@@ -25,28 +35,8 @@ function dateRange(start?: string | null, end?: string | null) {
   return s || e || "";
 }
 
-function statusBadge(status?: string, isActive?: boolean) {
-  // ปรับสีได้ตามใจ
-  if (isActive === false) {
-    return { text: "INACTIVE", cls: "bg-slate-100 text-slate-600 border-slate-200" };
-  }
-
-  const s = (status ?? "").toUpperCase();
-  if (s === "ACTIVE" || s === "IN_PROGRESS") {
-    return { text: s || "ACTIVE", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-  }
-  if (s === "PLANNING") {
-    return { text: "PLANNING", cls: "bg-amber-50 text-amber-700 border-amber-200" };
-  }
-  if (s === "DONE") {
-    return { text: "DONE", cls: "bg-sky-50 text-sky-700 border-sky-200" };
-  }
-  return { text: s || "UNKNOWN", cls: "bg-slate-50 text-slate-700 border-slate-200" };
-}
-
 export default function ProjectCard({ project }: Props) {
   const range = dateRange(project.startDate, project.dueDate);
-  const st = statusBadge(project.status, project.isActive);
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 flex items-start justify-between">
@@ -68,16 +58,15 @@ export default function ProjectCard({ project }: Props) {
               {project.name}
             </Link>
 
-            {/* ✅ Status badge */}
-            <span
-              className={[
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                st.cls,
-              ].join(" ")}
-              title={project.status ?? ""}
-            >
-              {st.text}
-            </span>
+            {/* ✅ Status badge (ไทย) */}
+            {project.status ? (
+              <span
+                className={projectStatusBadgeClass(project.status)}
+                title={project.status}
+              >
+                {projectStatusLabelTH(project.status)}
+              </span>
+            ) : null}
           </div>
 
           {/* ✅ description */}

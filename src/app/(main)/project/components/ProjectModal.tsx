@@ -1,49 +1,42 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import type { ProjectApi, ProjectStatus } from "../../../lib/projectService";
 
 export type NewProjectPayload = {
   name: string;
   description: string;
-
   trelloTag: string;
-
-  // ✅ map ให้ backend
   key: string;
 
-  status?: ProjectStatus;
-  startDate?: string | null; // ✅ ISO string
-  dueDate?: string | null;   // ✅ ISO string
-};
-
-export type UpdateProjectPayload = Partial<Omit<NewProjectPayload, "key">> & {
-  id: string;
-  key?: string;
+  status: ProjectStatus;
+  startDate: string | null;
+  dueDate: string | null;
 };
 
 type Props = {
   open: boolean;
   onClose: () => void;
-
   onCreate?: (data: NewProjectPayload) => void;
-
   initial?: ProjectApi | null;
-  onUpdate?: (data: UpdateProjectPayload) => void;
 };
 
+/**
+ * ✅ ISO -> YYYY-MM-DD สำหรับ <input type="date">
+ * ใช้ UTC เพื่อกันวันเพี้ยน (timezone shift)
+ */
 function toDateInput(iso?: string | null) {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
+
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
-/** ✅ allow only English (A-Z, 0-9, _ , -) no spaces */
 function normalizeTag(raw: string) {
   return raw.trim().toUpperCase();
 }
@@ -51,125 +44,108 @@ function isValidEnglishTag(tag: string) {
   return /^[A-Z0-9_-]+$/.test(tag);
 }
 
-/** ✅ date input (YYYY-MM-DD) -> ISO (start-of-day / end-of-day) */
-function toISOStartFromDateInput(v?: string) {
+/**
+ * ✅ YYYY-MM-DD -> ISO
+ * ใช้เที่ยงวัน UTC (12:00Z) กัน timezone shift ข้ามวัน/ข้ามปี
+ */
+function toISODateNoShift(v?: string) {
   const s = (v ?? "").trim();
   if (!s) return null;
-  const d = new Date(`${s}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
-}
-function toISOEndFromDateInput(v?: string) {
-  const s = (v ?? "").trim();
-  if (!s) return null;
-  const d = new Date(`${s}T23:59:59.000Z`);
+
+  // s = "YYYY-MM-DD"
+  const [yy, mm, dd] = s.split("-").map((x) => Number(x));
+  if (!yy || !mm || !dd) return null;
+
+  const d = new Date(Date.UTC(yy, mm - 1, dd, 12, 0, 0, 0));
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
 }
 
-export default function ProjectModal({
-  open,
+const STATUS_OPTIONS: Array<{ value: ProjectStatus; labelTH: string }> = [
+  { value: "PLANNING", labelTH: "วางแผน" },
+  { value: "ACTIVE", labelTH: "ดำเนินการ" },
+  { value: "ON_HOLD", labelTH: "หยุดชั่วคราว" },
+  { value: "COMPLETED", labelTH: "เสร็จสิ้น" },
+  { value: "CANCELLED", labelTH: "ยกเลิก" },
+];
+
+type FormState = {
+  name: string;
+  description: string;
+  trelloTag: string;
+  status: ProjectStatus;
+  startDate: string; // YYYY-MM-DD
+  dueDate: string;   // YYYY-MM-DD
+};
+
+function buildInitialForm(initial?: ProjectApi | null): FormState {
+  if (!initial) {
+    return {
+      name: "",
+      description: "",
+      trelloTag: "",
+      status: "PLANNING",
+      startDate: "",
+      dueDate: "",
+    };
+  }
+
+  return {
+    name: initial.name ?? "",
+    description: initial.description ?? "",
+    trelloTag: (initial.trelloTag ?? "").toUpperCase(),
+    status: (initial.status ?? "PLANNING") as ProjectStatus,
+    startDate: toDateInput(initial.startDate),
+    dueDate: toDateInput(initial.dueDate),
+  };
+}
+
+function ProjectModalInner({
+  initial,
   onClose,
   onCreate,
-  initial,
-  onUpdate,
-}: Props) {
-  const isEdit = !!initial?.id;
-
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-
-  const [trelloTag, setTrelloTag] = useState("");
-
-  const [status, setStatus] = useState<ProjectStatus>("PLANNING");
-  const [startDate, setStartDate] = useState(""); // YYYY-MM-DD
-  const [dueDate, setDueDate] = useState("");     // YYYY-MM-DD
-
+}: {
+  initial?: ProjectApi | null;
+  onClose: () => void;
+  onCreate?: (data: NewProjectPayload) => void;
+}) {
+  const [form, setForm] = useState<FormState>(() => buildInitialForm(initial));
   const [touchedTag, setTouchedTag] = useState(false);
-  const [submitError, setSubmitError] = useState<string>("");
-
-  useEffect(() => {
-    if (!open) return;
-
-    setSubmitError("");
-    setTouchedTag(false);
-
-    if (initial) {
-      setName(initial.name ?? "");
-      setDescription(initial.description ?? "");
-      setTrelloTag((initial.trelloTag ?? "").toUpperCase());
-
-      setStatus((initial.status ?? "PLANNING") as ProjectStatus);
-      setStartDate(toDateInput(initial.startDate));
-      setDueDate(toDateInput(initial.dueDate));
-    } else {
-      setName("");
-      setDescription("");
-      setTrelloTag("");
-
-      setStatus("PLANNING");
-      setStartDate("");
-      setDueDate("");
-    }
-  }, [open, initial]);
-
-  const title = useMemo(
-    () => (isEdit ? "Edit Project" : "Create New Project"),
-    [isEdit]
-  );
+  const [submitError, setSubmitError] = useState("");
 
   const tagError = useMemo(() => {
-    const v = normalizeTag(trelloTag);
+    const v = normalizeTag(form.trelloTag);
     if (!v) return "กรุณากรอก Trello Tag";
     if (!isValidEnglishTag(v))
       return "กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)";
     return "";
-  }, [trelloTag]);
-
-  if (!open) return null;
+  }, [form.trelloTag]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setSubmitError("");
     setTouchedTag(true);
 
-    const normTag = normalizeTag(trelloTag);
+    const normTag = normalizeTag(form.trelloTag);
+    if (!normTag) return setSubmitError("กรุณากรอก Trello Tag");
+    if (!isValidEnglishTag(normTag))
+      return setSubmitError("Trello Tag ต้องเป็นภาษาอังกฤษเท่านั้น");
 
-    if (!normTag) {
-      setSubmitError("กรุณากรอก Trello Tag ก่อนสร้างโปรเจกต์");
-      return;
-    }
-    if (!isValidEnglishTag(normTag)) {
-      setSubmitError("Trello Tag ไม่ถูกต้อง: ต้องเป็นภาษาอังกฤษเท่านั้น");
-      return;
-    }
-
-    // ✅ แปลง date -> ISO ก่อนส่ง
-    const startISO = toISOStartFromDateInput(startDate);
-    const dueISO = toISOEndFromDateInput(dueDate);
-
-    const payloadBase: NewProjectPayload = {
-      name: name.trim(),
-      description: description.trim(),
-
+    const payload: NewProjectPayload = {
+      name: form.name.trim(),
+      description: form.description.trim(),
       trelloTag: normTag,
-      key: normTag, // ✅ map key = trelloTag
+      key: normTag,
+      status: form.status,
 
-      status,
-      startDate: startISO,
-      dueDate: dueISO,
+      // ✅ กันปีโดด/วันโดด
+      startDate: toISODateNoShift(form.startDate),
+      dueDate: toISODateNoShift(form.dueDate),
     };
 
-    if (isEdit && initial?.id) {
-      onUpdate?.({
-        id: initial.id,
-        ...payloadBase,
-        key: payloadBase.key,
-      });
-    } else {
-      onCreate?.(payloadBase);
-    }
+    console.log("[ProjectModal submit payload]", payload);
 
+    onCreate?.(payload);
     onClose();
   };
 
@@ -177,7 +153,7 @@ export default function ProjectModal({
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
       <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl border border-slate-200 p-6 md:p-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <h2 className="text-lg font-semibold text-slate-900">สร้างโปรเจกต์ใหม่</h2>
           <button
             type="button"
             onClick={onClose}
@@ -188,58 +164,54 @@ export default function ProjectModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* name */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700">Name</label>
+            <label className="text-xs font-medium text-slate-700">ชื่อโปรเจกต์</label>
             <input
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
                          focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              placeholder="E-commerce Platform"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               required
             />
           </div>
 
-          {/* description */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-slate-700">
-              Description
-            </label>
+            <label className="text-xs font-medium text-slate-700">รายละเอียด</label>
             <textarea
               className="w-full min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
                          focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              placeholder="รายละเอียดของโปรเจกต์"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              value={form.description}
+              onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
               required
             />
           </div>
 
-          {/* trelloTag (only) */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">
               Trello Tag <span className="text-red-500">*</span>
             </label>
             <input
               className={[
-                "w-full rounded-xl border px-3 py-2 text-sm outline-none",
-                "focus:ring-1",
+                "w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-1",
                 touchedTag && tagError
                   ? "border-red-300 focus:border-red-500 focus:ring-red-500"
                   : "border-slate-200 focus:border-blue-500 focus:ring-blue-500",
               ].join(" ")}
               placeholder="ECOM"
-              value={trelloTag}
-              onChange={(e) => {
-                const raw = e.target.value;
-                const up = raw.toUpperCase().replace(/\s+/g, "");
-                setTrelloTag(up);
-              }}
+              value={form.trelloTag}
+              onChange={(e) =>
+                setForm((p) => ({
+                  ...p,
+                  trelloTag: e.target.value.toUpperCase().replace(/\s+/g, ""),
+                }))
+              }
               onBlur={() => setTouchedTag(true)}
               required
-              inputMode="latin"
+              // ✅ inputMode: ไม่มี "text" (เลยทำให้แดง)
+              inputMode={undefined}
               autoCapitalize="characters"
+              pattern="[A-Za-z0-9_-]+"
+              title="กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)"
             />
             <p className="text-[11px] text-slate-400">
               * หมายเหตุ: ต้องกรอกเป็นภาษาอังกฤษเท่านั้น (A-Z, 0-9, _ , -) และห้ามเว้นวรรค
@@ -249,54 +221,48 @@ export default function ProjectModal({
             ) : null}
           </div>
 
-          {/* status */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-700">
-                Status
-              </label>
+              <label className="text-xs font-medium text-slate-700">สถานะ</label>
               <select
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
                            focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
-                value={status}
-                onChange={(e) => setStatus(e.target.value as ProjectStatus)}
+                value={form.status}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, status: e.target.value as ProjectStatus }))
+                }
               >
-                <option value="PLANNING">PLANNING — วางแผน</option>
-                <option value="ACTIVE">ACTIVE — ดำเนินการ</option>
-                <option value="ON_HOLD">ON_HOLD — หยุดชั่วคราว</option>
-                <option value="COMPLETED">COMPLETED — เสร็จสิ้น</option>
-                <option value="CANCELLED">CANCELLED — ยกเลิก</option>
+                {STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.labelTH}
+                  </option>
+                ))}
               </select>
             </div>
             <div />
           </div>
 
-          {/* start + due */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-700">
-                Start date
-              </label>
+              <label className="text-xs font-medium text-slate-700">วันที่เริ่ม</label>
               <input
                 type="date"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
                            focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                value={form.startDate}
+                onChange={(e) => setForm((p) => ({ ...p, startDate: e.target.value }))}
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-700">
-                Due date
-              </label>
+              <label className="text-xs font-medium text-slate-700">วันที่สิ้นสุด</label>
               <input
                 type="date"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
                            focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                min={startDate || undefined}
+                value={form.dueDate}
+                onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
+                min={form.startDate || undefined}
               />
             </div>
           </div>
@@ -313,17 +279,24 @@ export default function ProjectModal({
               onClick={onClose}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
             >
-              Cancel
+              ยกเลิก
             </button>
             <button
               type="submit"
               className="rounded-full bg-blue-600 px-5 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
             >
-              {isEdit ? "Save" : "Create"}
+              สร้าง
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+}
+
+export default function ProjectModal(props: Props) {
+  const { open, initial } = props;
+  if (!open) return null;
+  const modalKey = `${open}-${initial?.id ?? "new"}`;
+  return <ProjectModalInner key={modalKey} {...props} />;
 }
