@@ -1,53 +1,87 @@
 // src/app/lib/projectService.ts
-import { apiGet, apiPost } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
 
-/** shape ที่ backend /projects ส่งมา (ตาม swagger) */
+export type ProjectStatus =
+  | "PLANNING"
+  | "ACTIVE"
+  | "ON_HOLD"
+  | "COMPLETED"
+  | "CANCELLED";
+
 export type ProjectApi = {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   key: string;
+
+  trelloBoardId?: string | null;
   trelloTag: string;
+
+  status?: ProjectStatus;
+  startDate?: string | null;
+  dueDate?: string | null;
+
   isActive: boolean;
+
   createdAt: string;
   updatedAt: string;
 };
 
-/** POST body (ไม่มี trelloBoardId) */
 export type CreateProjectPayload = {
   name: string;
   description: string;
   key: string;
   trelloTag: string;
+
+  status?: ProjectStatus;
+  startDate?: string | null;
+  dueDate?: string | null;
+  isActive?: boolean;
 };
 
-/** ✅ UI/list ใช้ข้อมูลจริงเท่านั้น */
-export type ProjectListItem = Pick<ProjectApi, "id" | "name" | "description" | "key">;
+export type UpdateProjectPayload = Partial<
+  Omit<CreateProjectPayload, "key"> // ปกติ key ไม่ควรแก้
+>;
+
+export type ProjectListItem = Pick<
+  ProjectApi,
+  "id" | "name" | "description" | "key" | "status" | "startDate" | "dueDate" | "isActive"
+>;
 
 export type ProjectsResponse = {
   items: ProjectListItem[];
 };
 
-/** ✅ GET /projects (list) */
 export async function fetchProjects(): Promise<ProjectsResponse> {
   const projects = await apiGet<ProjectApi[]>("/projects");
-
   return {
-    items: projects.map((p) => ({
+    items: (projects ?? []).map((p) => ({
       id: p.id,
       name: p.name,
       description: p.description,
       key: p.key,
+      status: p.status,
+      startDate: p.startDate,
+      dueDate: p.dueDate,
+      isActive: p.isActive,
     })),
   };
 }
 
-/** ✅ GET /projects/key/{key} */
 export async function fetchProjectByKey(key: string): Promise<ProjectApi> {
   return apiGet<ProjectApi>(`/projects/key/${encodeURIComponent(key)}`);
 }
 
-/** ✅ POST /projects */
-export async function createProject(payload: CreateProjectPayload): Promise<ProjectApi> {
+export async function createProject(
+  payload: CreateProjectPayload
+): Promise<ProjectApi> {
   return apiPost<ProjectApi>("/projects", payload);
+}
+
+/** ✅ PUT (แก้ project) */
+export async function updateProject(
+  id: string,
+  payload: UpdateProjectPayload
+): Promise<ProjectApi> {
+  return apiPut<ProjectApi>(`/projects/${encodeURIComponent(id)}`, payload);
 }

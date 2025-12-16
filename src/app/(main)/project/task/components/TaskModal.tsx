@@ -1,50 +1,31 @@
 "use client";
 
-import { useMemo, useState, FormEvent } from "react";
+import React, { FormEvent, useMemo, useState } from "react";
 import { XMarkIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 
-export type TaskStatusColor =
-  | "green"
-  | "yellow"
-  | "orange"
-  | "red"
-  | "purple"
-  | "blue";
-
 export type TaskCreatePayload = {
-  tag: string;
   name: string;
-  statusColor: TaskStatusColor;
-  startDate?: string;
-  endDate?: string;
   description?: string;
-  memberIds: string[];
-  subtasks: string[];
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  memberIds?: string[];
+  subtasks?: string[];
 };
 
-type Member = { id: string; name: string };
+type Member = { id: string; name: string; avatarText?: string };
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: TaskCreatePayload) => void;
-
-  // optional: ส่งสมาชิกมาจาก parent ได้ (ถ้าไม่ส่ง จะใช้ mock)
+  onCreate: (data: TaskCreatePayload) => void | Promise<void>;
   members?: Member[];
 };
 
-const STATUS_COLORS: { key: TaskStatusColor; className: string }[] = [
-  { key: "green", className: "bg-emerald-600" },
-  { key: "yellow", className: "bg-amber-500" },
-  { key: "orange", className: "bg-orange-600" },
-  { key: "red", className: "bg-red-600" },
-  { key: "purple", className: "bg-purple-600" },
-  { key: "blue", className: "bg-blue-600" },
-];
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function Label({ children }: { children: React.ReactNode }) {
   return (
-    <label className="text-xs font-medium text-slate-700">{children}</label>
+    <label className="mb-2 block text-sm font-medium text-slate-700">
+      {children}
+    </label>
   );
 }
 
@@ -66,7 +47,7 @@ function TextareaBase(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) 
     <textarea
       {...props}
       className={[
-        "w-full min-h-[110px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900",
+        "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900",
         "outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
         props.className ?? "",
       ].join(" ")}
@@ -74,65 +55,94 @@ function TextareaBase(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) 
   );
 }
 
-/** Multi-select dropdown (simple & clean) */
 function MembersDropdown({
   members,
   value,
   onChange,
+  disabled,
 }: {
   members: Member[];
   value: string[];
   onChange: (next: string[]) => void;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
-  const selectedNames = useMemo(() => {
-    const map = new Map(members.map((m) => [m.id, m.name]));
-    return value.map((id) => map.get(id)).filter(Boolean) as string[];
-  }, [members, value]);
-
   const toggle = (id: string) => {
-    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+    if (value.includes(id)) onChange(value.filter((x) => x !== id));
+    else onChange([...value, id]);
   };
+
+  const selected = useMemo(
+    () => members.filter((m) => value.includes(m.id)),
+    [members, value]
+  );
 
   return (
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        disabled={disabled}
+        onClick={() => setOpen((s) => !s)}
+        className={[
+          "flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm",
+          disabled ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50",
+        ].join(" ")}
       >
-        <div className="flex items-center justify-between">
-          <span className={selectedNames.length ? "text-slate-900" : "text-slate-400"}>
-            {selectedNames.length ? selectedNames.join(", ") : "เลือกสมาชิก"}
-          </span>
-          <ChevronDownIcon className="h-4 w-4 text-slate-500" />
+        <div className="flex flex-wrap items-center gap-2">
+          {disabled ? (
+            <span className="text-slate-500">กำลังโหลดรายชื่อ…</span>
+          ) : selected.length === 0 ? (
+            <span className="text-slate-500">เลือกสมาชิก</span>
+          ) : (
+            selected.map((m) => (
+              <span
+                key={m.id}
+                className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-700"
+              >
+                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-700">
+                  {(m.avatarText ?? m.name?.[0] ?? "?").toUpperCase()}
+                </span>
+                {m.name}
+              </span>
+            ))
+          )}
         </div>
+        <ChevronDownIcon className="h-5 w-5 text-slate-500" />
       </button>
 
-      {open && (
+      {!disabled && open && (
         <>
           <button
             type="button"
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-40 cursor-default"
             onClick={() => setOpen(false)}
             aria-label="close members dropdown"
           />
           <div className="absolute z-50 mt-2 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
-            {members.map((m) => (
-              <label
-                key={m.id}
-                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-slate-50"
-              >
-                <input
-                  type="checkbox"
-                  checked={value.includes(m.id)}
-                  onChange={() => toggle(m.id)}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                <span className="text-slate-800">{m.name}</span>
-              </label>
-            ))}
+            {members.length === 0 ? (
+              <div className="px-2 py-2 text-sm text-slate-500">
+                ไม่พบสมาชิก
+              </div>
+            ) : (
+              members.map((m) => (
+                <label
+                  key={m.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={value.includes(m.id)}
+                    onChange={() => toggle(m.id)}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[11px] font-semibold text-slate-700">
+                    {(m.avatarText ?? m.name?.[0] ?? "?").toUpperCase()}
+                  </span>
+                  <span className="text-slate-800">{m.name}</span>
+                </label>
+              ))
+            )}
           </div>
         </>
       )}
@@ -141,173 +151,180 @@ function MembersDropdown({
 }
 
 export default function TaskModal({ open, onClose, onCreate, members }: Props) {
-  const memberList: Member[] =
-    members ??
-    [
-      { id: "u1", name: "Golf" },
-      { id: "u2", name: "Mint" },
-      { id: "u3", name: "Boss" },
-      { id: "u4", name: "Dev Team" },
-    ];
+  // ✅ เอา fallback JS/K ออก เพื่อไม่ให้หลอกตา
+  const memberOptions = useMemo<Member[]>(() => members ?? [], [members]);
+  const membersReady = (members ?? []).length > 0;
 
-  const [tag, setTag] = useState("");
   const [name, setName] = useState("");
-  const [statusColor, setStatusColor] = useState<TaskStatusColor>("green");
+  const [description, setDescription] = useState("");
+
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [description, setDescription] = useState("");
 
   const [memberIds, setMemberIds] = useState<string[]>([]);
 
   const [hasSubtasks, setHasSubtasks] = useState(false);
   const [subtasks, setSubtasks] = useState<string[]>([""]);
 
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   if (!open) return null;
 
-  const addSubtask = () => setSubtasks((p) => [...p, ""]);
+  const addSubtask = () => setSubtasks((prev) => [...prev, ""]);
+  const removeSubtask = (idx: number) =>
+    setSubtasks((prev) => prev.filter((_, i) => i !== idx));
   const updateSubtask = (idx: number, v: string) =>
-    setSubtasks((p) => p.map((x, i) => (i === idx ? v : x)));
+    setSubtasks((prev) => prev.map((x, i) => (i === idx ? v : x)));
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-
-    onCreate({
-      tag: tag.trim(),
-      name: name.trim(),
-      statusColor,
-      startDate,
-      endDate,
-      description: description.trim(),
-      memberIds,
-      subtasks: hasSubtasks ? subtasks.map((s) => s.trim()).filter(Boolean) : [],
-    });
-
-    onClose();
+  const resetForm = () => {
+    setName("");
+    setDescription("");
+    setStartDate("");
+    setEndDate("");
+    setMemberIds([]);
+    setHasSubtasks(false);
+    setSubtasks([""]);
+    setError(null);
   };
 
-  const selectedClass =
-    STATUS_COLORS.find((x) => x.key === statusColor)?.className ?? "bg-emerald-600";
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("กรุณากรอกชื่อ Task");
+      return;
+    }
+
+    const cleanedSubtasks = hasSubtasks
+      ? subtasks.map((s) => s.trim()).filter(Boolean)
+      : [];
+
+    try {
+      setSubmitting(true);
+
+      await onCreate({
+        name: trimmedName,
+        description: description.trim() || undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        memberIds,
+        subtasks: cleanedSubtasks,
+      });
+
+      resetForm();
+      onClose();
+    } catch (err: any) {
+      setError(err?.message ?? "สร้างการ์ดไม่สำเร็จ");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-50">
-      {/* overlay */}
-      <button
-        className="absolute inset-0 bg-black/50"
-        onClick={onClose}
-        aria-label="close overlay"
-      />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">เพิ่มการ์ดใหม่</h2>
+            <p className="text-xs text-slate-500">
+              กรอกข้อมูลแล้วกด Create เพื่อสร้างการ์ด
+            </p>
+          </div>
 
-      <form
-        onSubmit={submit}
-        className="relative mx-auto mt-10 w-[92%] max-w-3xl rounded-3xl bg-white p-6 shadow-2xl"
-      >
-        {/* header */}
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">เพิ่ม Task</h2>
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-full p-2 hover:bg-slate-100"
-            aria-label="close"
+            onClick={() => {
+              resetForm();
+              onClose();
+            }}
+            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
           >
-            <XMarkIcon className="h-5 w-5 text-slate-700" />
+            <XMarkIcon className="h-6 w-6" />
           </button>
         </div>
 
-        {/* content */}
-        <div className="mt-5 space-y-5">
-          {/* row 1: Tag / Name */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <FieldLabel>Tag</FieldLabel>
-              <InputBase placeholder="Enter [ tag ]" value={tag} onChange={(e) => setTag(e.target.value)} />
+        <form onSubmit={handleSubmit} className="px-6 py-5">
+          {error && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
             </div>
-            <div className="space-y-1.5">
-              <FieldLabel>ชื่อ Task</FieldLabel>
+          )}
+
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <Label>ชื่อ Task</Label>
               <InputBase
-                placeholder="Enter task name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                required
+                placeholder="กรอกชื่อ Task"
+                disabled={submitting}
               />
             </div>
           </div>
 
-          {/* row 2: Status */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <FieldLabel>Status (สี)</FieldLabel>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] text-slate-500">สีที่เลือก</span>
-                <span className={`h-3 w-12 rounded-full ${selectedClass}`} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-6 gap-2">
-              {STATUS_COLORS.map((c) => {
-                const active = c.key === statusColor;
-                return (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => setStatusColor(c.key)}
-                    className={[
-                      "h-9 rounded-2xl",
-                      c.className,
-                      active ? "ring-2 ring-slate-900 ring-offset-2" : "opacity-90 hover:opacity-100",
-                    ].join(" ")}
-                    aria-label={`status-${c.key}`}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          {/* row 3: Dates */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <FieldLabel>Start Date</FieldLabel>
-              <InputBase type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel>End Date</FieldLabel>
-              <InputBase type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </div>
-          </div>
-
-          {/* row 4: Members dropdown */}
-          <div className="space-y-1.5">
-            <FieldLabel>สมาชิก</FieldLabel>
-            <MembersDropdown members={memberList} value={memberIds} onChange={setMemberIds} />
-          </div>
-
-          {/* row 5: Description */}
-          <div className="space-y-1.5">
-            <FieldLabel>Description</FieldLabel>
+          <div className="mt-4">
+            <Label>รายละเอียด</Label>
             <TextareaBase
-              placeholder="Enter task description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              placeholder="อธิบายงานคร่าว ๆ ..."
+              disabled={submitting}
             />
           </div>
 
-          {/* row 6: Subtask toggle + list */}
-          <div className="rounded-2xl border border-slate-200 p-4">
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <Label>Start Date</Label>
+              <InputBase
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+            <div>
+              <Label>Due Date</Label>
+              <InputBase
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <Label>Assignees</Label>
+            <MembersDropdown
+              members={memberOptions}
+              value={memberIds}
+              onChange={setMemberIds}
+              disabled={!membersReady}
+            />
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-slate-900">Subtask</p>
-                <p className="text-[11px] text-slate-500">เปิดเพื่อเพิ่มรายการย่อย</p>
+                <div className="text-sm font-semibold text-slate-900">
+                  Checklist / Subtasks
+                </div>
+                <div className="text-xs text-slate-500">
+                  เปิดใช้งานเพื่อเพิ่มรายการย่อย
+                </div>
               </div>
 
-              {/* ✅ Toggle */}
               <button
                 type="button"
                 onClick={() => setHasSubtasks((v) => !v)}
                 className={[
                   "relative inline-flex h-7 w-12 items-center rounded-full transition",
-                  hasSubtasks ? "bg-blue-600" : "bg-slate-200",
+                  hasSubtasks ? "bg-blue-600" : "bg-slate-300",
                 ].join(" ")}
-                aria-pressed={hasSubtasks}
                 aria-label="toggle subtasks"
               >
                 <span
@@ -322,44 +339,59 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
             {hasSubtasks && (
               <div className="mt-4 space-y-2">
                 {subtasks.map((s, idx) => (
-                  <InputBase
-                    key={idx}
-                    placeholder={`Subtask ${idx + 1}`}
-                    value={s}
-                    onChange={(e) => updateSubtask(idx, e.target.value)}
-                  />
+                  <div key={idx} className="flex gap-2">
+                    <InputBase
+                      placeholder={`Subtask ${idx + 1}`}
+                      value={s}
+                      onChange={(e) => updateSubtask(idx, e.target.value)}
+                      disabled={submitting}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSubtask(idx)}
+                      className="rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-100"
+                      disabled={submitting || subtasks.length === 1}
+                      title="ลบ"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ))}
 
                 <button
                   type="button"
                   onClick={addSubtask}
-                  className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white hover:bg-slate-800"
+                  className="mt-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                  disabled={submitting}
                 >
-                  + เพิ่ม Subtask
+                  + เพิ่มรายการย่อย
                 </button>
               </div>
             )}
           </div>
 
-        </div>
-
-        {/* footer */}
-        <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-200 px-6 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="rounded-full bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Create
-          </button>
-        </div>
-      </form>
+          <div className="mt-6 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                resetForm();
+                onClose();
+              }}
+              className="rounded-full border border-slate-200 bg-white px-6 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-full bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              disabled={submitting}
+            >
+              {submitting ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

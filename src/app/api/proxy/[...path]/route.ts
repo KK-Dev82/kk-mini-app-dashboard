@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const BASE = process.env.API_BASE_URL || ""; // https://xxxx.ngrok-free.app/api
+const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || ""; // https://xxxx.ngrok-free.app/api
 
 function joinUrl(base: string, path: string) {
   return base.replace(/\/+$/, "") + "/" + path.replace(/^\/+/, "");
@@ -21,7 +21,7 @@ function getProxyPath(req: NextRequest, paramsPath: unknown) {
 
 async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   if (!BASE) {
-    return NextResponse.json({ error: "Missing API_BASE_URL" }, { status: 500 });
+    return NextResponse.json({ error: "Missing NEXT_PUBLIC_API_BASE_URL" }, { status: 500 });
   }
 
   const path = getProxyPath(req, ctx?.params?.path);

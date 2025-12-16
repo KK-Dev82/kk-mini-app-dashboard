@@ -50,6 +50,25 @@ export type TrelloCard = {
   url: string;
 };
 
+export type TrelloList = {
+  id: string;
+  name: string;
+  pos: number;
+  closed: boolean;
+};
+
+/** ✅ GET /trello/members */
+export type TrelloMember = {
+  id: string;
+  username: string;
+  fullName: string;
+  avatarUrl?: string;
+  initials?: string;
+};
+
+export const fetchTrelloMembers = () =>
+  apiGet<TrelloMember[]>("/trello/members");
+
 /** ✅ GET /trello/cards/tag/{tag} */
 export async function fetchTrelloCardsByTag(tag: string): Promise<TrelloCard[]> {
   const t = (tag ?? "").trim();
@@ -74,3 +93,5 @@ export async function createTrelloCard(
 ): Promise<TrelloCard> {
   return apiPost<TrelloCard>("/trello/cards", payload);
 }
+
+export const fetchTrelloLists = () => apiGet<TrelloList[]>("/trello/lists");
