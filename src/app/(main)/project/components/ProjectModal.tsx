@@ -1,15 +1,28 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
+
+import DatePicker from "react-datepicker";
+import { th } from "date-fns/locale";
+
 import type { ProjectApi, ProjectStatus } from "../../../lib/projectService";
+import {
+  fetchProjectMembers,
+  addProjectMember,
+  removeProjectMember,
+  updateProjectMemberRole,
+  type ProjectMemberApi,
+  type ProjectMemberRole,
+} from "../../../lib/projectService";
+
+import { fetchUsers, type UserApi } from "../../../lib/userService";
 
 export type NewProjectPayload = {
   name: string;
   description: string;
   trelloTag: string;
   key: string;
-
   status: ProjectStatus;
   startDate: string | null;
   dueDate: string | null;
@@ -18,47 +31,29 @@ export type NewProjectPayload = {
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreate?: (data: NewProjectPayload) => void;
+
+  // ✅ return ProjectApi เพื่อเอา id ไป add members ต่อ
+  onCreate?: (data: NewProjectPayload) => Promise<ProjectApi>;
+  onUpdate?: (id: string, data: NewProjectPayload) => Promise<ProjectApi>;
+
   initial?: ProjectApi | null;
 };
 
-/**
- * ✅ ISO -> YYYY-MM-DD สำหรับ <input type="date">
- * ใช้ UTC เพื่อกันวันเพี้ยน (timezone shift)
- */
-function toDateInput(iso?: string | null) {
-  if (!iso) return "";
+function parseISOToDate(iso?: string | null) {
+  if (!iso) return null;
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return Number.isNaN(d.getTime()) ? null : d;
 }
-
+function toISOFromDateNoShift(d?: Date | null) {
+  if (!d) return null;
+  const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0));
+  return utc.toISOString();
+}
 function normalizeTag(raw: string) {
   return raw.trim().toUpperCase();
 }
 function isValidEnglishTag(tag: string) {
   return /^[A-Z0-9_-]+$/.test(tag);
-}
-
-/**
- * ✅ YYYY-MM-DD -> ISO
- * ใช้เที่ยงวัน UTC (12:00Z) กัน timezone shift ข้ามวัน/ข้ามปี
- */
-function toISODateNoShift(v?: string) {
-  const s = (v ?? "").trim();
-  if (!s) return null;
-
-  // s = "YYYY-MM-DD"
-  const [yy, mm, dd] = s.split("-").map((x) => Number(x));
-  if (!yy || !mm || !dd) return null;
-
-  const d = new Date(Date.UTC(yy, mm - 1, dd, 12, 0, 0, 0));
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString();
 }
 
 const STATUS_OPTIONS: Array<{ value: ProjectStatus; labelTH: string }> = [
@@ -69,13 +64,19 @@ const STATUS_OPTIONS: Array<{ value: ProjectStatus; labelTH: string }> = [
   { value: "CANCELLED", labelTH: "ยกเลิก" },
 ];
 
+const ROLE_OPTIONS: Array<{ value: ProjectMemberRole; label: string }> = [
+  // { value: "OWNER", label: "OWNER" },
+  { value: "DEVELOPER", label: "DEVELOPER" },
+  // { value: "VIEWER", label: "VIEWER" },
+];
+
 type FormState = {
   name: string;
   description: string;
   trelloTag: string;
   status: ProjectStatus;
-  startDate: string; // YYYY-MM-DD
-  dueDate: string;   // YYYY-MM-DD
+  startDate: Date | null;
+  dueDate: Date | null;
 };
 
 function buildInitialForm(initial?: ProjectApi | null): FormState {
@@ -85,8 +86,8 @@ function buildInitialForm(initial?: ProjectApi | null): FormState {
       description: "",
       trelloTag: "",
       status: "PLANNING",
-      startDate: "",
-      dueDate: "",
+      startDate: null,
+      dueDate: null,
     };
   }
 
@@ -95,41 +96,206 @@ function buildInitialForm(initial?: ProjectApi | null): FormState {
     description: initial.description ?? "",
     trelloTag: (initial.trelloTag ?? "").toUpperCase(),
     status: (initial.status ?? "PLANNING") as ProjectStatus,
-    startDate: toDateInput(initial.startDate),
-    dueDate: toDateInput(initial.dueDate),
+    startDate: parseISOToDate(initial.startDate),
+    dueDate: parseISOToDate(initial.dueDate),
   };
+}
+
+function avatarText(name?: string | null, email?: string | null) {
+  return (name?.[0] || email?.[0] || "?").toUpperCase();
 }
 
 function ProjectModalInner({
   initial,
   onClose,
   onCreate,
+  onUpdate,
 }: {
   initial?: ProjectApi | null;
   onClose: () => void;
-  onCreate?: (data: NewProjectPayload) => void;
+  onCreate?: (data: NewProjectPayload) => Promise<ProjectApi>;
+  onUpdate?: (id: string, data: NewProjectPayload) => Promise<ProjectApi>;
 }) {
   const [form, setForm] = useState<FormState>(() => buildInitialForm(initial));
   const [touchedTag, setTouchedTag] = useState(false);
+
   const [submitError, setSubmitError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // members
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState("");
+
+  const [allUsers, setAllUsers] = useState<UserApi[]>([]);
+  const [initialMembers, setInitialMembers] = useState<ProjectMemberApi[]>([]);
+  const [selected, setSelected] = useState<Record<string, ProjectMemberRole>>({});
+  const [userQuery, setUserQuery] = useState("");
+
+  const isEdit = !!initial?.id;
+
+  useEffect(() => {
+    setForm(buildInitialForm(initial));
+    setTouchedTag(false);
+    setSubmitError("");
+    setSubmitting(false);
+
+    setMembersError("");
+    setInitialMembers([]);
+    setSelected({});
+    setUserQuery("");
+  }, [initial]);
+
+  // โหลด users (ทั้ง create/edit)
+  useEffect(() => {
+    let cancelled = false;
+    setMembersLoading(true);
+    setMembersError("");
+
+    fetchUsers()
+      .then((users) => {
+        if (cancelled) return;
+        setAllUsers(users ?? []);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setMembersError(e instanceof Error ? e.message : "โหลด users ไม่สำเร็จ");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setMembersLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ถ้า edit: โหลด members เดิมมา sync เข้า selected
+  useEffect(() => {
+    if (!isEdit || !initial?.id) return;
+
+    let cancelled = false;
+    setMembersLoading(true);
+    setMembersError("");
+
+    fetchProjectMembers(initial.id)
+      .then((members) => {
+        if (cancelled) return;
+        setInitialMembers(members ?? []);
+
+        const next: Record<string, ProjectMemberRole> = {};
+        (members ?? []).forEach((m) => (next[m.id] = m.role ?? "DEVELOPER"));
+        setSelected(next);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setMembersError(e instanceof Error ? e.message : "โหลดสมาชิกไม่สำเร็จ");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setMembersLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, initial?.id]);
 
   const tagError = useMemo(() => {
     const v = normalizeTag(form.trelloTag);
     if (!v) return "กรุณากรอก Trello Tag";
-    if (!isValidEnglishTag(v))
-      return "กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)";
+    if (!isValidEnglishTag(v)) return "กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)";
     return "";
   }, [form.trelloTag]);
 
-  const handleSubmit = (e: FormEvent) => {
+  const dateError = useMemo(() => {
+    if (form.startDate && form.dueDate && form.dueDate.getTime() < form.startDate.getTime()) {
+      return "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
+    }
+    return "";
+  }, [form.startDate, form.dueDate]);
+
+  const filteredUsers = useMemo(() => {
+    const s = userQuery.trim().toLowerCase();
+    if (!s) return allUsers;
+    return allUsers.filter((u) => {
+      return (
+        (u.name ?? "").toLowerCase().includes(s) ||
+        (u.email ?? "").toLowerCase().includes(s)
+      );
+    });
+  }, [allUsers, userQuery]);
+
+  const toggleUser = (userId: string) => {
+    setSelected((prev) => {
+      const next = { ...prev };
+      if (next[userId]) delete next[userId];
+      else next[userId] = "DEVELOPER";
+      return next;
+    });
+  };
+
+  const changeRole = (userId: string, role: ProjectMemberRole) => {
+    setSelected((prev) => ({ ...prev, [userId]: role }));
+  };
+
+  // ✅ sync members ในโหมด edit (diff)
+  const applyMembersDiff = async (projectId: string) => {
+    const before = new Map<string, ProjectMemberRole>();
+    initialMembers.forEach((m) => before.set(m.id, m.role));
+
+    const after = new Map<string, ProjectMemberRole>();
+    Object.entries(selected).forEach(([uid, role]) => after.set(uid, role));
+
+    const toAdd: Array<{ userId: string; role: ProjectMemberRole }> = [];
+    const toRemove: string[] = [];
+    const toUpdateRole: Array<{ userId: string; role: ProjectMemberRole }> = [];
+
+    for (const [uid, role] of after.entries()) {
+      if (!before.has(uid)) toAdd.push({ userId: uid, role });
+      else {
+        const prevRole = before.get(uid);
+        if (prevRole && prevRole !== role) toUpdateRole.push({ userId: uid, role });
+      }
+    }
+    for (const uid of before.keys()) {
+      if (!after.has(uid)) toRemove.push(uid);
+    }
+
+    await Promise.all([
+      // ✅ ใช้ POST /members (no-auth)
+      ...toAdd.map((p) => addProjectMember(projectId, p)),
+      ...toRemove.map((uid) => removeProjectMember(projectId, uid)),
+      ...toUpdateRole.map((p) => updateProjectMemberRole(projectId, p.userId, p.role)),
+    ]);
+
+    const fresh = await fetchProjectMembers(projectId);
+    setInitialMembers(fresh ?? []);
+
+    const next: Record<string, ProjectMemberRole> = {};
+    (fresh ?? []).forEach((m) => (next[m.id] = m.role ?? "DEVELOPER"));
+    setSelected(next);
+  };
+
+  // ✅ add members ในโหมด create (เพิ่มอย่างเดียว)
+  const applyMembersForCreate = async (projectId: string) => {
+    const toAdd = Object.entries(selected).map(([userId, role]) => ({ userId, role }));
+    if (toAdd.length === 0) return;
+    await Promise.all(toAdd.map((p) => addProjectMember(projectId, p))); // ✅ no-auth
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitError("");
     setTouchedTag(true);
 
     const normTag = normalizeTag(form.trelloTag);
-    if (!normTag) return setSubmitError("กรุณากรอก Trello Tag");
-    if (!isValidEnglishTag(normTag))
-      return setSubmitError("Trello Tag ต้องเป็นภาษาอังกฤษเท่านั้น");
+
+    if (!isEdit) {
+      if (!normTag) return setSubmitError("กรุณากรอก Trello Tag");
+      if (!isValidEnglishTag(normTag)) return setSubmitError("Trello Tag ต้องเป็นภาษาอังกฤษเท่านั้น");
+    }
+    if (dateError) return setSubmitError(dateError);
 
     const payload: NewProjectPayload = {
       name: form.name.trim(),
@@ -137,52 +303,73 @@ function ProjectModalInner({
       trelloTag: normTag,
       key: normTag,
       status: form.status,
-
-      // ✅ กันปีโดด/วันโดด
-      startDate: toISODateNoShift(form.startDate),
-      dueDate: toISODateNoShift(form.dueDate),
+      startDate: toISOFromDateNoShift(form.startDate),
+      dueDate: toISOFromDateNoShift(form.dueDate),
     };
 
-    console.log("[ProjectModal submit payload]", payload);
-
-    onCreate?.(payload);
-    onClose();
+    setSubmitting(true);
+    try {
+      if (isEdit && initial?.id) {
+        await onUpdate?.(initial.id, payload);
+        await applyMembersDiff(initial.id);
+        onClose();
+      } else {
+        const created = await onCreate?.(payload);
+        if (!created?.id) throw new Error("Create success but missing project id");
+        await applyMembersForCreate(created.id);
+        onClose();
+      }
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Submit failed");
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const inputClass =
+    "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white outline-none " +
+    "focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl border border-slate-200 p-6 md:p-8">
+      <div id="datepicker-portal" />
+
+      <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white shadow-xl border border-slate-200 p-6 md:p-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-slate-900">สร้างโปรเจกต์ใหม่</h2>
+          <h2 className="text-lg font-semibold text-slate-900">
+            {isEdit ? "แก้ไขโปรเจกต์" : "สร้างโปรเจกต์ใหม่"}
+          </h2>
           <button
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+            disabled={submitting}
           >
             <XMarkIcon className="h-5 w-5" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* fields เดิม */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">ชื่อโปรเจกต์</label>
             <input
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
-                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className={inputClass}
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               required
+              disabled={submitting}
             />
           </div>
 
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">รายละเอียด</label>
             <textarea
-              className="w-full min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
-                         focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
               value={form.description}
               onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
               required
+              disabled={submitting}
             />
           </div>
 
@@ -193,30 +380,29 @@ function ProjectModalInner({
             <input
               className={[
                 "w-full rounded-xl border px-3 py-2 text-sm outline-none focus:ring-1",
-                touchedTag && tagError
+                !isEdit && touchedTag && tagError
                   ? "border-red-300 focus:border-red-500 focus:ring-red-500"
                   : "border-slate-200 focus:border-blue-500 focus:ring-blue-500",
+                isEdit ? "bg-slate-50 text-slate-500 cursor-not-allowed" : "bg-white",
               ].join(" ")}
               placeholder="ECOM"
               value={form.trelloTag}
               onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  trelloTag: e.target.value.toUpperCase().replace(/\s+/g, ""),
-                }))
+                setForm((p) => ({ ...p, trelloTag: e.target.value.toUpperCase().replace(/\s+/g, "") }))
               }
               onBlur={() => setTouchedTag(true)}
-              required
-              // ✅ inputMode: ไม่มี "text" (เลยทำให้แดง)
-              inputMode={undefined}
-              autoCapitalize="characters"
+              required={!isEdit}
+              disabled={isEdit || submitting}
               pattern="[A-Za-z0-9_-]+"
-              title="กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)"
             />
-            <p className="text-[11px] text-slate-400">
-              * หมายเหตุ: ต้องกรอกเป็นภาษาอังกฤษเท่านั้น (A-Z, 0-9, _ , -) และห้ามเว้นวรรค
-            </p>
-            {touchedTag && tagError ? (
+            {!isEdit ? (
+              <p className="text-[11px] text-slate-400">
+                * หมายเหตุ: ต้องกรอกเป็นภาษาอังกฤษเท่านั้น (A-Z, 0-9, _ , -) และห้ามเว้นวรรค
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-400">* Trello Tag แก้ไม่ได้ (ใช้ผูกงาน/บอร์ด)</p>
+            )}
+            {!isEdit && touchedTag && tagError ? (
               <p className="text-[11px] text-red-600">{tagError}</p>
             ) : null}
           </div>
@@ -225,12 +411,10 @@ function ProjectModalInner({
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">สถานะ</label>
               <select
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
-                           focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
+                className={inputClass}
                 value={form.status}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, status: e.target.value as ProjectStatus }))
-                }
+                onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as ProjectStatus }))}
+                disabled={submitting}
               >
                 {STATUS_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
@@ -245,25 +429,132 @@ function ProjectModalInner({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">วันที่เริ่ม</label>
-              <input
-                type="date"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
-                           focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
-                value={form.startDate}
-                onChange={(e) => setForm((p) => ({ ...p, startDate: e.target.value }))}
+              <DatePicker
+                selected={form.startDate}
+                onChange={(d) => setForm((p) => ({ ...p, startDate: d }))}
+                dateFormat="dd/MM/yyyy"
+                locale={th}
+                placeholderText="วัน/เดือน/ปี"
+                showMonthDropdown
+                showYearDropdown
+                dropdownMode="select"
+                className={inputClass}
+                popperPlacement="bottom-start"
+                withPortal
+                portalId="datepicker-portal"
+                disabled={submitting}
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">วันที่สิ้นสุด</label>
-              <input
-                type="date"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none
-                           focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
-                value={form.dueDate}
-                onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
-                min={form.startDate || undefined}
+              <DatePicker
+                selected={form.dueDate}
+                onChange={(d) => setForm((p) => ({ ...p, dueDate: d }))}
+                dateFormat="dd/MM/yyyy"
+                locale={th}
+                placeholderText="วัน/เดือน/ปี"
+                showMonthDropdown
+                showYearDropdown
+                dropdownMode="select"
+                minDate={form.startDate ?? undefined}
+                className={inputClass}
+                popperPlacement="bottom-start"
+                withPortal
+                portalId="datepicker-portal"
+                disabled={submitting}
               />
+            </div>
+          </div>
+
+          {/* ✅ สมาชิก: ไม่มี Preview แล้ว */}
+          <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">สมาชิกในโปรเจกต์</div>
+                <div className="text-[11px] text-slate-500">
+                  เลือกสมาชิกได้เลย — ตอนกด “สร้าง/บันทึก” ระบบจะ sync ให้ทันที
+                </div>
+              </div>
+              <div className="text-xs text-slate-500">
+                เลือกแล้ว {Object.keys(selected).length} คน
+              </div>
+            </div>
+
+            {membersError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {membersError}
+              </div>
+            ) : null}
+
+            <input
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 bg-white"
+              placeholder="ค้นหาชื่อ / email เพื่อเพิ่มสมาชิก"
+              value={userQuery}
+              onChange={(e) => setUserQuery(e.target.value)}
+              disabled={membersLoading || submitting}
+            />
+
+            <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+              <div className="px-4 py-2 text-xs font-semibold text-slate-700 border-b border-slate-100">
+                ผู้ใช้ทั้งหมด
+              </div>
+
+              <div className="max-h-[320px] overflow-auto">
+                {membersLoading ? (
+                  <div className="p-4 text-sm text-slate-500">กำลังโหลด…</div>
+                ) : filteredUsers.length === 0 ? (
+                  <div className="p-4 text-sm text-slate-500">ไม่พบผู้ใช้</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {filteredUsers.map((u) => {
+                      const checked = !!selected[u.id];
+
+                      return (
+                        <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50">
+                          <label className="flex items-center gap-3 cursor-pointer flex-1">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleUser(u.id)}
+                              className="h-4 w-4 rounded border-slate-300"
+                              disabled={submitting}
+                            />
+
+                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-700">
+                              {avatarText(u.name, u.email)}
+                            </span>
+
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-slate-900 truncate">{u.name}</div>
+                              <div className="text-xs text-slate-500 truncate">{u.email}</div>
+                            </div>
+                          </label>
+
+                          {checked ? (
+                            <select
+                              className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                              value={selected[u.id]}
+                              onChange={(e) => changeRole(u.id, e.target.value as ProjectMemberRole)}
+                              disabled={submitting}
+                            >
+                              {ROLE_OPTIONS.map((r) => (
+                                <option key={r.value} value={r.value}>
+                                  {r.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="text-[11px] text-slate-400">
+              * ลบสมาชิก = เอาติ๊กออก (ตอนกดบันทึกจะ sync ให้)
             </div>
           </div>
 
@@ -278,14 +569,16 @@ function ProjectModalInner({
               type="button"
               onClick={onClose}
               className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              disabled={submitting}
             >
               ยกเลิก
             </button>
             <button
               type="submit"
-              className="rounded-full bg-blue-600 px-5 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700"
+              className="rounded-full bg-blue-600 px-5 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+              disabled={submitting}
             >
-              สร้าง
+              {submitting ? "กำลังบันทึก..." : isEdit ? "บันทึก" : "สร้าง"}
             </button>
           </div>
         </form>

@@ -1,6 +1,8 @@
 // app/(main)/layout.tsx
 import React from "react";
 import Navbar from "../component/Navbar";
+import "react-datepicker/dist/react-datepicker.css";
+
 
 export default function MainLayout({
   children,

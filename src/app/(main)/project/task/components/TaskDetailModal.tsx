@@ -1,8 +1,12 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
-import type { TrelloCard, TrelloMember } from "../../../../lib/trelloService";
+import type { TrelloCard, TrelloMember, TrelloList } from "../../../../lib/trelloService";
+import { updateTrelloCard } from "../../../../lib/trelloService";
+
+// ✅ ใช้ DatePicker กลาง
+import AppDatePicker from "../../../component/datepicker/AppDatePicker";
 
 function fmtTH(dateStr?: string | null) {
   if (!dateStr) return "-";
@@ -24,18 +28,37 @@ function pct(card: TrelloCard) {
   return Math.round((done / total) * 100);
 }
 
+/** Date | null -> ISO (คุมให้เป็น 09:00Z ตามที่คุณใช้เดิม) */
+function toISOFromDate(d?: Date | null) {
+  if (!d) return undefined;
+  const x = new Date(d);
+  if (Number.isNaN(x.getTime())) return undefined;
+
+  // normalize เวลาให้เหมือนของเดิม
+  x.setUTCHours(9, 0, 0, 0);
+  return x.toISOString();
+}
+
 export default function TaskDetailModal({
   open,
   onClose,
   card,
   members,
   projectTag,
+  lists,
+  onUpdated,
 }: {
   open: boolean;
   onClose: () => void;
   card: TrelloCard | null;
   members: TrelloMember[];
   projectTag?: string;
+
+  // ✅ ใช้สำหรับ dropdown list
+  lists: TrelloList[];
+
+  // ✅ คุณบอกว่าแก้แล้ว
+  onUpdated: (next: TrelloCard) => void;
 }) {
   const memberMap = useMemo(() => {
     const m = new Map<string, TrelloMember>();
@@ -50,7 +73,73 @@ export default function TaskDetailModal({
 
   const progress = useMemo(() => (card ? pct(card) : 0), [card]);
 
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string>("");
+
+  // ✅ เปลี่ยน start/due มาเป็น Date | null เพื่อใช้ AppDatePicker
+  const [form, setForm] = useState<{
+    listId: string;
+    name: string;
+    desc: string;
+    startDate: Date | null;
+    dueDate: Date | null;
+  }>({
+    listId: "",
+    name: "",
+    desc: "",
+    startDate: null,
+    dueDate: null,
+  });
+
+  // sync form เมื่อเปิด modal / เปลี่ยน card
+  useEffect(() => {
+    if (!card) return;
+
+    setEditing(false);
+    setErr("");
+    setSaving(false);
+
+    setForm({
+      listId: (card as any).idList ?? "",
+      name: card.name ?? "",
+      desc: card.desc ?? "",
+      startDate: card.start ? new Date(card.start) : null,
+      dueDate: card.due ? new Date(card.due) : null,
+    });
+  }, [card?.id]);
+
   if (!open || !card) return null;
+
+  const canSave = form.listId.trim() && form.name.trim();
+
+  const handleSave = async () => {
+    try {
+      setErr("");
+      if (!canSave) {
+        setErr("กรุณากรอกชื่อ และเลือกคอลัมน์ (list)");
+        return;
+      }
+
+      setSaving(true);
+
+      const updated = await updateTrelloCard(card.id, {
+        listId: form.listId.trim(),
+        name: form.name.trim(),
+        desc: form.desc ?? "",
+        startDate: toISOFromDate(form.startDate),
+        dueDate: toISOFromDate(form.dueDate),
+      });
+
+      onUpdated(updated);
+      setEditing(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Update card failed";
+      setErr(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
@@ -75,7 +164,17 @@ export default function TaskDetailModal({
               ))}
             </div>
 
-            <h2 className="text-lg font-semibold leading-snug">{card.name}</h2>
+            {!editing ? (
+              <h2 className="text-lg font-semibold leading-snug">{card.name}</h2>
+            ) : (
+              <input
+                value={form.name}
+                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-white/30"
+                placeholder="Task title"
+                disabled={saving}
+              />
+            )}
 
             <div className="text-xs text-white/60">
               Start: {fmtTH(card.start)} • Due: {fmtTH(card.due)}
@@ -113,9 +212,7 @@ export default function TaskDetailModal({
                           .toString()
                           .toUpperCase()}
                       </span>
-                      <span className="text-white/90">
-                        {m.fullName || m.username}
-                      </span>
+                      <span className="text-white/90">{m.fullName || m.username}</span>
                     </span>
                   ))}
                 </div>
@@ -125,9 +222,20 @@ export default function TaskDetailModal({
             {/* desc */}
             <section className="space-y-2">
               <div className="text-sm font-semibold text-white/90">คำอธิบาย</div>
-              <div className="rounded-2xl bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap">
-                {card.desc?.trim() ? card.desc : "-"}
-              </div>
+              {!editing ? (
+                <div className="rounded-2xl bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap">
+                  {card.desc?.trim() ? card.desc : "-"}
+                </div>
+              ) : (
+                <textarea
+                  value={form.desc}
+                  onChange={(e) => setForm((p) => ({ ...p, desc: e.target.value }))}
+                  rows={5}
+                  className="w-full rounded-2xl bg-white/10 p-4 text-sm text-white/90 outline-none ring-1 ring-white/10 focus:ring-white/30"
+                  placeholder="รายละเอียด..."
+                  disabled={saving}
+                />
+              )}
             </section>
 
             {/* checklist */}
@@ -154,22 +262,15 @@ export default function TaskDetailModal({
               ) : (
                 <div className="space-y-3">
                   {card.checklists.map((cl) => (
-                    <div
-                      key={cl.id}
-                      className="rounded-2xl bg-white/5 p-4"
-                    >
+                    <div key={cl.id} className="rounded-2xl bg-white/5 p-4">
                       <div className="text-sm font-semibold text-white/90">
                         {cl.name || "Checklist"}
                       </div>
-
                       <div className="mt-3 space-y-2">
                         {(cl.checkItems ?? []).map((it) => {
                           const done = it.state === "complete";
                           return (
-                            <div
-                              key={it.id}
-                              className="flex items-start gap-3 rounded-xl bg-white/0 px-2 py-1"
-                            >
+                            <div key={it.id} className="flex items-start gap-3 rounded-xl px-2 py-1">
                               <span
                                 className={[
                                   "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded border",
@@ -181,13 +282,10 @@ export default function TaskDetailModal({
                               >
                                 {done ? "✓" : ""}
                               </span>
-
                               <div
                                 className={[
                                   "text-sm",
-                                  done
-                                    ? "text-white/70 line-through"
-                                    : "text-white/85",
+                                  done ? "text-white/70 line-through" : "text-white/85",
                                 ].join(" ")}
                               >
                                 {it.name}
@@ -203,14 +301,12 @@ export default function TaskDetailModal({
             </section>
           </div>
 
-          {/* right (เหมือนแถบด้านขวา Trello) */}
+          {/* right */}
           <aside className="space-y-3">
             <div className="rounded-2xl bg-white/5 p-4">
-              <div className="text-sm font-semibold text-white/90">
-                การทำงาน
-              </div>
+              <div className="text-sm font-semibold text-white/90">การทำงาน</div>
 
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 space-y-3">
                 <a
                   href={card.url}
                   target="_blank"
@@ -220,10 +316,84 @@ export default function TaskDetailModal({
                   เปิดใน Trello
                 </a>
 
-                <div className="rounded-xl bg-white/5 px-4 py-3 text-xs text-white/60">
-                  * ถ้าจะทำ “แก้ไขสมาชิก/วัน/Checklist ใน modal” เดี๋ยวต้องเพิ่ม
-                  endpoint update ที่ฝั่ง API ด้วย
-                </div>
+                {!editing ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="w-full rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
+                  >
+                    แก้ไขการ์ด
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    {/* list */}
+                    <div className="space-y-1">
+                      <div className="text-xs text-white/60">คอลัมน์ (List)</div>
+                      <select
+                        value={form.listId}
+                        onChange={(e) => setForm((p) => ({ ...p, listId: e.target.value }))}
+                        className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                        disabled={saving}
+                      >
+                        {(lists ?? [])
+                          .filter((l) => !l.closed)
+                          .map((l) => (
+                            <option key={l.id} value={l.id} className="text-slate-900">
+                              {l.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {/* ✅ dates (ใช้ AppDatePicker กลาง) */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <div className="text-xs text-white/60">Start</div>
+                        <AppDatePicker
+                          value={form.startDate}
+                          onChange={(d) => setForm((p) => ({ ...p, startDate: d }))}
+                          placeholder="เลือกวันที่เริ่ม"
+                          disabled={saving}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="text-xs text-white/60">Due</div>
+                        <AppDatePicker
+                          value={form.dueDate}
+                          onChange={(d) => setForm((p) => ({ ...p, dueDate: d }))}
+                          placeholder="เลือกวันที่สิ้นสุด"
+                          disabled={saving}
+                        />
+                      </div>
+                    </div>
+
+                    {err ? (
+                      <div className="rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
+                        {err}
+                      </div>
+                    ) : null}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(false)}
+                        className="flex-1 rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
+                        disabled={saving}
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSave}
+                        className="flex-1 rounded-xl bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                        disabled={saving || !canSave}
+                      >
+                        {saving ? "Saving..." : "บันทึก"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </aside>

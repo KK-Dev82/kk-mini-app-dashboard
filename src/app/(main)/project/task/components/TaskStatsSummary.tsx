@@ -79,6 +79,17 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   });
   const [dragging, setDragging] = useState(false);
 
+  // ✅ สำคัญ: handle update จาก modal (เอาไว้แก้ error onUpdated + sync UI)
+  const handleCardUpdated = (updated: TrelloCard) => {
+    if (!updated?.id) return;
+
+    // อัปเดตใน list cards
+    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+
+    // ถ้ากำลังเปิดการ์ดใบนี้อยู่ ให้ sync ด้วย
+    setActiveCard((prev) => (prev?.id === updated.id ? updated : prev));
+  };
+
   // โหลด lists
   useEffect(() => {
     let cancelled = false;
@@ -356,6 +367,8 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         card={activeCard}
         members={members}
         projectTag={projectTag}
+        lists={lists} // ✅ ส่ง lists ไปให้ dropdown column
+        onUpdated={handleCardUpdated} // ✅ สำคัญ
       />
 
       {/* ✅ Loading Overlay สวย ๆ ใช้ร่วมทุกหน้าได้ */}

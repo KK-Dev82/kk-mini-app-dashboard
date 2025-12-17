@@ -1,5 +1,7 @@
 // src/app/lib/trelloService.ts
-import { apiGet, apiPost } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
+
+/* ----------------------------- Types ----------------------------- */
 
 export type TrelloLabel = {
   id: string;
@@ -66,6 +68,8 @@ export type TrelloMember = {
   initials?: string;
 };
 
+/* ----------------------------- APIs ----------------------------- */
+
 export const fetchTrelloMembers = () =>
   apiGet<TrelloMember[]>("/trello/members");
 
@@ -94,4 +98,23 @@ export async function createTrelloCard(
   return apiPost<TrelloCard>("/trello/cards", payload);
 }
 
+/** ✅ PUT /trello/cards/{cardId} */
+export type UpdateTrelloCardPayload = {
+  listId: string;
+  name: string;
+  desc?: string;
+  startDate?: string; // ISO
+  dueDate?: string; // ISO
+};
+
+export async function updateTrelloCard(
+  cardId: string,
+  payload: UpdateTrelloCardPayload
+): Promise<TrelloCard> {
+  const id = (cardId ?? "").trim();
+  if (!id) throw new Error("Missing cardId");
+  return apiPut<TrelloCard>(`/trello/cards/${encodeURIComponent(id)}`, payload);
+}
+
+/** ✅ GET /trello/lists */
 export const fetchTrelloLists = () => apiGet<TrelloList[]>("/trello/lists");

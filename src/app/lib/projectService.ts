@@ -1,5 +1,5 @@
 // src/app/lib/projectService.ts
-import { apiGet, apiPost, apiPut } from "./apiClient";
+import { apiDelete, apiGet, apiPost, apiPut } from "./apiClient";
 
 export type ProjectStatus =
   | "PLANNING"
@@ -85,7 +85,7 @@ export function projectStatusBadgeClass(status?: ProjectStatus | null): string {
 }
 
 /* =========================
- * API
+ * API: Projects
  * ========================= */
 
 export async function fetchProjects(): Promise<ProjectsResponse> {
@@ -122,4 +122,107 @@ export async function updateProject(
 ): Promise<ProjectApi> {
   console.log("[projectService.updateProject payload]", { id, ...payload });
   return apiPut<ProjectApi>(`/projects/${encodeURIComponent(id)}`, payload);
+}
+
+/* =========================
+ * API: Project Members
+ * ========================= */
+
+/**
+ * ตอนนี้ backend role รองรับจริงแค่ "DEVELOPER"
+ * (กันยิงค่าอื่นแล้ว 400)
+ */
+export type ProjectMemberRole = "DEVELOPER";
+
+export type ProjectMemberApi = {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string | null;
+  trelloMemberId?: string | null;
+  role: ProjectMemberRole;
+};
+
+/** GET /projects/{id}/members (ต้อง auth -> ตอนนี้ยังไม่ login จะ 401) */
+export async function fetchProjectMembers(
+  projectId: string
+): Promise<ProjectMemberApi[]> {
+  return apiGet<ProjectMemberApi[]>(
+    `/projects/${encodeURIComponent(projectId)}/members`
+  );
+}
+
+/**
+ * ✅ SAFE: ถ้า 401/unauthorized ให้ return [] เพื่อไม่ให้หน้าแดง/throw
+ * ใช้ตัวนี้ตอน render ProjectCard / หน้า list ช่วงที่ยังไม่ทำ login
+ */
+export async function fetchProjectMembersSafe(
+  projectId: string
+): Promise<ProjectMemberApi[]> {
+  try {
+    const members = await fetchProjectMembers(projectId);
+    return members ?? [];
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      msg.includes("(401)") ||
+      msg.includes("401") ||
+      msg.toLowerCase().includes("unauthorized")
+    ) {
+      return [];
+    }
+    console.warn("fetchProjectMembers failed:", msg);
+    return [];
+  }
+}
+
+/**
+ * ✅ POST /projects/{id}/members (no auth required)
+ * body: { userId, role }
+ */
+export async function addProjectMember(
+  projectId: string,
+  payload: { userId: string; role: ProjectMemberRole }
+): Promise<ProjectMemberApi> {
+  return apiPost<ProjectMemberApi>(
+    `/projects/${encodeURIComponent(projectId)}/members`,
+    payload
+  );
+}
+
+/** (เก็บไว้เผื่อใช้) POST /projects/{id}/members/auth */
+export async function addProjectMemberWithAuth(
+  projectId: string,
+  payload: { userId: string; role: ProjectMemberRole }
+): Promise<ProjectMemberApi> {
+  return apiPost<ProjectMemberApi>(
+    `/projects/${encodeURIComponent(projectId)}/members/auth`,
+    payload
+  );
+}
+
+/** DELETE /projects/{id}/members/{userId} */
+export async function removeProjectMember(
+  projectId: string,
+  userId: string
+): Promise<{ success?: boolean }> {
+  return apiDelete<{ success?: boolean }>(
+    `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(
+      userId
+    )}`
+  );
+}
+
+/** PUT /projects/{id}/members/{userId}/role  body: { role } */
+export async function updateProjectMemberRole(
+  projectId: string,
+  userId: string,
+  role: ProjectMemberRole
+): Promise<ProjectMemberApi> {
+  return apiPut<ProjectMemberApi>(
+    `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(
+      userId
+    )}/role`,
+    { role }
+  );
 }

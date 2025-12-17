@@ -21,14 +21,20 @@ function getProxyPath(req: NextRequest, paramsPath: unknown) {
 
 async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   if (!BASE) {
-    return NextResponse.json({ error: "Missing NEXT_PUBLIC_API_BASE_URL" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Missing NEXT_PUBLIC_API_BASE_URL" },
+      { status: 500 }
+    );
   }
 
   const path = getProxyPath(req, ctx?.params?.path);
   const qs = req.nextUrl.search || "";
   const targetUrl = joinUrl(BASE, path) + qs;
 
+  // ---- headers ----
   const headers = new Headers(req.headers);
+
+  // ล้าง header ที่ไม่ควรส่งไป upstream
   headers.delete("host");
   headers.delete("content-length");
 
@@ -36,13 +42,25 @@ async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   headers.set("ngrok-skip-browser-warning", "true");
   headers.set("Accept", "application/json");
 
+  // ✅ สำคัญ: อ่าน token จาก HttpOnly cookie แล้วแนบ Authorization ให้ upstream
+  // - ใน NextRequest คุณอ่าน cookie ได้แบบนี้
+  const token = req.cookies.get("access_token")?.value;
+
+  // กัน client ส่ง Authorization แปลก ๆ มาเอง
+  headers.delete("authorization");
+
+  if (token) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
+
+  // ---- body ----
+  const body =
+    req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+
   const upstream = await fetch(targetUrl, {
     method: req.method,
     headers,
-    body:
-      req.method === "GET" || req.method === "HEAD"
-        ? undefined
-        : await req.arrayBuffer(),
+    body,
     redirect: "manual",
   });
 
@@ -63,6 +81,7 @@ async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   }
 
   // ส่งกลับ JSON (หรือ text) ตามจริง
+  // NOTE: คง content-type เดิมไว้
   return new NextResponse(raw, {
     status: upstream.status,
     headers: { "content-type": ct || "application/json" },
