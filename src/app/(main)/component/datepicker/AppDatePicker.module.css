@@ -1,14 +1,19 @@
-/* src/app/datepicker.css */
+/* AppDatePicker.module.css */
 
-/* popper wrapper */
-.dp-th-popper {
+/* ✅ popper wrapper: กันโดน z-index ทับใน modal */
+.popper {
   z-index: 9999;
 }
 
-/* main calendar box */
-.dp-th.react-datepicker {
+/* ✅ เอาหัวสามเหลี่ยมออก (ถ้ามี) */
+.popper :global(.react-datepicker__triangle) {
+  display: none;
+}
+
+/* ✅ กล่องปฏิทิน */
+.calendar {
   border: 1px solid #e2e8f0; /* slate-200 */
-  border-radius: 16px; /* 2xl-ish */
+  border-radius: 16px;
   box-shadow: 0 20px 50px rgba(2, 6, 23, 0.18);
   overflow: hidden;
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial,
@@ -16,14 +21,14 @@
 }
 
 /* header */
-.dp-th .react-datepicker__header {
+.calendar :global(.react-datepicker__header) {
   background: #f8fafc; /* slate-50 */
   border-bottom: 1px solid #e2e8f0;
   padding: 12px 12px 10px;
 }
 
 /* current month title */
-.dp-th .react-datepicker__current-month {
+.calendar :global(.react-datepicker__current-month) {
   font-weight: 700;
   color: #0f172a; /* slate-900 */
   font-size: 14px;
@@ -31,50 +36,50 @@
 }
 
 /* month/year dropdown row */
-.dp-th .react-datepicker__header__dropdown {
+.calendar :global(.react-datepicker__header__dropdown) {
   display: flex;
   gap: 8px;
   justify-content: center;
   align-items: center;
 }
 
-.dp-th .react-datepicker__month-dropdown-container,
-.dp-th .react-datepicker__year-dropdown-container {
+.calendar :global(.react-datepicker__month-dropdown-container),
+.calendar :global(.react-datepicker__year-dropdown-container) {
   margin: 0;
 }
 
-.dp-th select.react-datepicker__month-select,
-.dp-th select.react-datepicker__year-select {
+.calendar :global(select.react-datepicker__month-select),
+.calendar :global(select.react-datepicker__year-select) {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 6px 10px;
-  background: white;
+  background: #ffffff;
   font-size: 12px;
   color: #0f172a;
   outline: none;
 }
 
-.dp-th select.react-datepicker__month-select:focus,
-.dp-th select.react-datepicker__year-select:focus {
+.calendar :global(select.react-datepicker__month-select:focus),
+.calendar :global(select.react-datepicker__year-select:focus) {
   border-color: #3b82f6; /* blue-500 */
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 }
 
 /* nav arrows */
-.dp-th .react-datepicker__navigation {
+.calendar :global(.react-datepicker__navigation) {
   top: 12px;
 }
 
-.dp-th .react-datepicker__navigation-icon::before {
+.calendar :global(.react-datepicker__navigation-icon::before) {
   border-color: #334155; /* slate-700 */
 }
 
-.dp-th .react-datepicker__navigation:hover .react-datepicker__navigation-icon::before {
+.calendar :global(.react-datepicker__navigation:hover .react-datepicker__navigation-icon::before) {
   border-color: #0f172a; /* slate-900 */
 }
 
-/* day names row */
-.dp-th .react-datepicker__day-name {
+/* day names */
+.calendar :global(.react-datepicker__day-name) {
   color: #64748b; /* slate-500 */
   font-weight: 600;
   font-size: 12px;
@@ -84,7 +89,7 @@
 }
 
 /* days */
-.dp-th .react-datepicker__day {
+.calendar :global(.react-datepicker__day) {
   width: 36px;
   line-height: 36px;
   margin: 0 2px;
@@ -94,25 +99,25 @@
 }
 
 /* hover */
-.dp-th .react-datepicker__day:hover {
+.calendar :global(.react-datepicker__day:hover) {
   background: #eff6ff; /* blue-50 */
 }
 
 /* selected */
-.dp-th .react-datepicker__day--selected,
-.dp-th .react-datepicker__day--keyboard-selected {
+.calendar :global(.react-datepicker__day--selected),
+.calendar :global(.react-datepicker__day--keyboard-selected) {
   background: #2563eb; /* blue-600 */
-  color: white;
+  color: #ffffff;
   font-weight: 700;
 }
 
 /* today */
-.dp-th .react-datepicker__day--today {
+.calendar :global(.react-datepicker__day--today) {
   position: relative;
   font-weight: 700;
 }
 
-.dp-th .react-datepicker__day--today::after {
+.calendar :global(.react-datepicker__day--today::after) {
   content: "";
   position: absolute;
   left: 50%;
@@ -126,61 +131,21 @@
 }
 
 /* outside month */
-.dp-th .react-datepicker__day--outside-month {
+.calendar :global(.react-datepicker__day--outside-month) {
   color: #94a3b8; /* slate-400 */
 }
 
 /* disabled */
-.dp-th .react-datepicker__day--disabled {
+.calendar :global(.react-datepicker__day--disabled) {
   color: #cbd5e1; /* slate-300 */
 }
 
-.dp-th .react-datepicker__day--disabled:hover {
+.calendar :global(.react-datepicker__day--disabled:hover) {
   background: transparent;
 }
 
-/* week container spacing */
-.dp-th .react-datepicker__week {
+/* week */
+.calendar :global(.react-datepicker__week) {
   display: flex;
   justify-content: center;
-}
-
-/* remove triangle if any */
-.dp-th-popper .react-datepicker__triangle {
-  display: none;
-}
-
-/* =========================================================
-   ✅ FIX: input text หายใน modal (เพราะ parent มี text-white)
-   - ต้องกำหนดสี/พื้นหลังของ input เอง
-   - ครอบด้วย .dp-th เพื่อไม่กระทบ input อื่น
-   ========================================================= */
-
-/* ให้ wrapper กว้างเต็ม */
-.dp-th .react-datepicker-wrapper,
-.dp-th .react-datepicker__input-container {
-  width: 100%;
-}
-
-/* input จริง */
-.dp-th .react-datepicker__input-container input {
-  width: 100%;
-  background: #ffffff;
-  color: #0f172a; /* ✅ ตัวหนังสือเข้ม */
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 14px;
-  outline: none;
-}
-
-/* placeholder */
-.dp-th .react-datepicker__input-container input::placeholder {
-  color: #94a3b8;
-}
-
-/* focus */
-.dp-th .react-datepicker__input-container input:focus {
-  border-color: #3b82f6; /* blue-500 */
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
 }

@@ -3,9 +3,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import type { TrelloCard, TrelloMember, TrelloList } from "../../../../lib/trelloService";
-import { updateTrelloCard } from "../../../../lib/trelloService";
+import {
+  updateTrelloCard,
+  assignTrelloMember,
+  unassignTrelloMember,
+  updateChecklistItemState,
+  type ChecklistItemState,
+} from "../../../../lib/trelloService";
 
-// ✅ ใช้ DatePicker กลาง
 import AppDatePicker from "../../../component/datepicker/AppDatePicker";
 
 function fmtTH(dateStr?: string | null) {
@@ -28,15 +33,21 @@ function pct(card: TrelloCard) {
   return Math.round((done / total) * 100);
 }
 
-/** Date | null -> ISO (คุมให้เป็น 09:00Z ตามที่คุณใช้เดิม) */
 function toISOFromDate(d?: Date | null) {
   if (!d) return undefined;
   const x = new Date(d);
   if (Number.isNaN(x.getTime())) return undefined;
-
-  // normalize เวลาให้เหมือนของเดิม
   x.setUTCHours(9, 0, 0, 0);
   return x.toISOString();
+}
+
+function uniq(arr: string[]) {
+  return Array.from(new Set(arr.filter(Boolean)));
+}
+
+function is404UnassignError(e: unknown) {
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return msg.includes("404") || msg.includes("Cannot POST") || msg.includes("/unassign");
 }
 
 export default function TaskDetailModal({
@@ -47,18 +58,18 @@ export default function TaskDetailModal({
   projectTag,
   lists,
   onUpdated,
+  onReload,
 }: {
   open: boolean;
   onClose: () => void;
   card: TrelloCard | null;
   members: TrelloMember[];
   projectTag?: string;
-
-  // ✅ ใช้สำหรับ dropdown list
   lists: TrelloList[];
-
-  // ✅ คุณบอกว่าแก้แล้ว
   onUpdated: (next: TrelloCard) => void;
+
+  /** ✅ หลังบันทึก/ติ๊ก checklist ให้ refetch cards ใหม่ */
+  onReload: () => void | Promise<void>;
 }) {
   const memberMap = useMemo(() => {
     const m = new Map<string, TrelloMember>();
@@ -77,28 +88,32 @@ export default function TaskDetailModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>("");
 
-  // ✅ เปลี่ยน start/due มาเป็น Date | null เพื่อใช้ AppDatePicker
+  // ✅ loading ของ checklist (กันกดรัว)
+  const [checkingId, setCheckingId] = useState<string>("");
+
   const [form, setForm] = useState<{
     listId: string;
     name: string;
     desc: string;
     startDate: Date | null;
     dueDate: Date | null;
+    memberIds: string[];
   }>({
     listId: "",
     name: "",
     desc: "",
     startDate: null,
     dueDate: null,
+    memberIds: [],
   });
 
-  // sync form เมื่อเปิด modal / เปลี่ยน card
   useEffect(() => {
     if (!card) return;
 
     setEditing(false);
     setErr("");
     setSaving(false);
+    setCheckingId("");
 
     setForm({
       listId: (card as any).idList ?? "",
@@ -106,12 +121,65 @@ export default function TaskDetailModal({
       desc: card.desc ?? "",
       startDate: card.start ? new Date(card.start) : null,
       dueDate: card.due ? new Date(card.due) : null,
+      memberIds: uniq(card.idMembers ?? []),
     });
   }, [card?.id]);
 
   if (!open || !card) return null;
 
   const canSave = form.listId.trim() && form.name.trim();
+
+  const toggleMember = (id: string) => {
+    setForm((p) => {
+      const has = p.memberIds.includes(id);
+      const next = has ? p.memberIds.filter((x) => x !== id) : [...p.memberIds, id];
+      return { ...p, memberIds: uniq(next) };
+    });
+  };
+
+  /** ✅ Optimistic update checklist state ใน UI ก่อน */
+  const patchChecklistItem = (checkItemId: string, nextState: ChecklistItemState) => {
+    const nextCard: TrelloCard = {
+      ...card,
+      checklists: (card.checklists ?? []).map((cl) => ({
+        ...cl,
+        checkItems: (cl.checkItems ?? []).map((it) =>
+          it.id === checkItemId ? { ...it, state: nextState } : it
+        ),
+      })),
+    };
+    onUpdated(nextCard);
+  };
+
+  /** ✅ กดติ๊ก checklist แล้ว call PUT */
+  const handleToggleChecklist = async (checkItemId: string, currentState: string) => {
+    if (!card?.id) return;
+
+    const nextState: ChecklistItemState =
+      currentState === "complete" ? "incomplete" : "complete";
+
+    try {
+      setErr("");
+      setCheckingId(checkItemId);
+
+      // 1) optimistic UI
+      patchChecklistItem(checkItemId, nextState);
+
+      // 2) call API
+      await updateChecklistItemState(card.id, checkItemId, nextState);
+
+      // 3) refetch เพื่อให้ badges/progress ตรง backend (แทน F5)
+      await onReload();
+    } catch (e) {
+      // rollback (ถ้า error ให้กลับไป state เดิม)
+      patchChecklistItem(checkItemId, currentState === "complete" ? "complete" : "incomplete");
+
+      const msg = e instanceof Error ? e.message : "Update checklist failed";
+      setErr(msg);
+    } finally {
+      setCheckingId("");
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -123,6 +191,7 @@ export default function TaskDetailModal({
 
       setSaving(true);
 
+      // 1) update card details
       const updated = await updateTrelloCard(card.id, {
         listId: form.listId.trim(),
         name: form.name.trim(),
@@ -131,7 +200,36 @@ export default function TaskDetailModal({
         dueDate: toISOFromDate(form.dueDate),
       });
 
-      onUpdated(updated);
+      // 2) sync members
+      const prev = new Set(card.idMembers ?? []);
+      const next = new Set(form.memberIds ?? []);
+      const toAdd = Array.from(next).filter((id) => !prev.has(id));
+      const toRemove = Array.from(prev).filter((id) => !next.has(id));
+
+      for (const memberId of toAdd) {
+        await assignTrelloMember(card.id, memberId);
+      }
+
+      // backend ยังไม่มี unassign → ไม่ให้ save พัง
+      for (const memberId of toRemove) {
+        try {
+          await unassignTrelloMember(card.id, memberId);
+        } catch (e) {
+          if (is404UnassignError(e)) continue;
+          throw e;
+        }
+      }
+
+      // 3) optimistic patch
+      onUpdated({
+        ...card,
+        ...updated,
+        idMembers: uniq(form.memberIds ?? []),
+      });
+
+      // 4) refetch (เอา checklist/badges กลับมาครบ)
+      await onReload();
+
       setEditing(false);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Update card failed";
@@ -266,11 +364,24 @@ export default function TaskDetailModal({
                       <div className="text-sm font-semibold text-white/90">
                         {cl.name || "Checklist"}
                       </div>
+
                       <div className="mt-3 space-y-2">
                         {(cl.checkItems ?? []).map((it) => {
                           const done = it.state === "complete";
+                          const busy = checkingId === it.id;
+
                           return (
-                            <div key={it.id} className="flex items-start gap-3 rounded-xl px-2 py-1">
+                            <button
+                              key={it.id}
+                              type="button"
+                              onClick={() => handleToggleChecklist(it.id, it.state)}
+                              disabled={busy}
+                              className={[
+                                "w-full text-left flex items-start gap-3 rounded-xl px-2 py-1",
+                                "hover:bg-white/5 transition",
+                                busy ? "opacity-60 cursor-not-allowed" : "",
+                              ].join(" ")}
+                            >
                               <span
                                 className={[
                                   "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded border",
@@ -282,6 +393,7 @@ export default function TaskDetailModal({
                               >
                                 {done ? "✓" : ""}
                               </span>
+
                               <div
                                 className={[
                                   "text-sm",
@@ -289,8 +401,9 @@ export default function TaskDetailModal({
                                 ].join(" ")}
                               >
                                 {it.name}
+                                {busy ? <span className="ml-2 text-xs text-white/40">...</span> : null}
                               </div>
-                            </div>
+                            </button>
                           );
                         })}
                       </div>
@@ -345,7 +458,43 @@ export default function TaskDetailModal({
                       </select>
                     </div>
 
-                    {/* ✅ dates (ใช้ AppDatePicker กลาง) */}
+                    {/* members picker */}
+                    <div className="space-y-1">
+                      <div className="text-xs text-white/60">Assignees</div>
+                      <div className="max-h-40 overflow-y-auto rounded-xl bg-white/5 p-2 ring-1 ring-white/10">
+                        {(members ?? []).length === 0 ? (
+                          <div className="px-2 py-2 text-xs text-white/50">ไม่มีสมาชิก</div>
+                        ) : (
+                          (members ?? []).map((m) => {
+                            const checked = form.memberIds.includes(m.id);
+                            return (
+                              <label
+                                key={m.id}
+                                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/5"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded border-white/20 bg-white/10"
+                                  checked={checked}
+                                  onChange={() => toggleMember(m.id)}
+                                  disabled={saving}
+                                />
+                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold">
+                                  {(m.initials || m.fullName?.[0] || m.username?.[0] || "?")
+                                    .toString()
+                                    .toUpperCase()}
+                                </span>
+                                <span className="text-sm text-white/85">
+                                  {m.fullName || m.username}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    {/* dates */}
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <div className="text-xs text-white/60">Start</div>
@@ -391,6 +540,10 @@ export default function TaskDetailModal({
                       >
                         {saving ? "Saving..." : "บันทึก"}
                       </button>
+                    </div>
+
+                    <div className="text-[11px] text-white/40">
+                      * ตอนนี้ backend ยังไม่มี unassign → เอาสมาชิกออกอาจยังไม่ sync แต่จะไม่ทำให้บันทึกล้ม
                     </div>
                   </div>
                 )}

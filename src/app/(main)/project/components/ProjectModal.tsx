@@ -2,9 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
-
-import DatePicker from "react-datepicker";
-import { th } from "date-fns/locale";
+import AppDatePicker from "../../component/datepicker/AppDatePicker";
 
 import type { ProjectApi, ProjectStatus } from "../../../lib/projectService";
 import {
@@ -44,14 +42,18 @@ function parseISOToDate(iso?: string | null) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d;
 }
+
 function toISOFromDateNoShift(d?: Date | null) {
   if (!d) return null;
+  // ✅ ใช้ UTC 12:00:00 กัน timezone shift (ตามของเดิมคุณ)
   const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0));
   return utc.toISOString();
 }
+
 function normalizeTag(raw: string) {
   return raw.trim().toUpperCase();
 }
+
 function isValidEnglishTag(tag: string) {
   return /^[A-Z0-9_-]+$/.test(tag);
 }
@@ -65,10 +67,17 @@ const STATUS_OPTIONS: Array<{ value: ProjectStatus; labelTH: string }> = [
 ];
 
 const ROLE_OPTIONS: Array<{ value: ProjectMemberRole; label: string }> = [
-  // { value: "OWNER", label: "OWNER" },
+  { value: "PROJECT_MANAGER", label: "PROJECT_MANAGER" },
   { value: "DEVELOPER", label: "DEVELOPER" },
-  // { value: "VIEWER", label: "VIEWER" },
+  { value: "DESIGNER", label: "DESIGNER" },
+  { value: "TESTER", label: "TESTER" },
+  { value: "MEMBER", label: "MEMBER" },
 ];
+
+function normalizeRole(role?: ProjectMemberRole | null): ProjectMemberRole {
+  const ok = ROLE_OPTIONS.some((r) => r.value === role);
+  return ok ? (role as ProjectMemberRole) : "MEMBER";
+}
 
 type FormState = {
   name: string;
@@ -128,7 +137,8 @@ function ProjectModalInner({
 
   const [allUsers, setAllUsers] = useState<UserApi[]>([]);
   const [initialMembers, setInitialMembers] = useState<ProjectMemberApi[]>([]);
-  const [selected, setSelected] = useState<Record<string, ProjectMemberRole>>({});
+  // ✅ แก้: เก็บ null เพื่อ "ติ๊กออก" โดยไม่ลบ key (กัน UI หาย)
+  const [selected, setSelected] = useState<Record<string, ProjectMemberRole | null>>({});
   const [userQuery, setUserQuery] = useState("");
 
   const isEdit = !!initial?.id;
@@ -183,8 +193,10 @@ function ProjectModalInner({
         if (cancelled) return;
         setInitialMembers(members ?? []);
 
-        const next: Record<string, ProjectMemberRole> = {};
-        (members ?? []).forEach((m) => (next[m.id] = m.role ?? "DEVELOPER"));
+        const next: Record<string, ProjectMemberRole | null> = {};
+        (members ?? []).forEach((m) => {
+          next[m.id] = normalizeRole(m.role);
+        });
         setSelected(next);
       })
       .catch((e) => {
@@ -219,33 +231,35 @@ function ProjectModalInner({
     const s = userQuery.trim().toLowerCase();
     if (!s) return allUsers;
     return allUsers.filter((u) => {
-      return (
-        (u.name ?? "").toLowerCase().includes(s) ||
-        (u.email ?? "").toLowerCase().includes(s)
-      );
+      return (u.name ?? "").toLowerCase().includes(s) || (u.email ?? "").toLowerCase().includes(s);
     });
   }, [allUsers, userQuery]);
 
+  // ✅ แก้: ไม่ delete key แล้ว แต่ set เป็น null แทน (ติ๊กออก)
   const toggleUser = (userId: string) => {
     setSelected((prev) => {
       const next = { ...prev };
-      if (next[userId]) delete next[userId];
-      else next[userId] = "DEVELOPER";
+      const isChecked = next[userId] != null; // null/undefined = ไม่เลือก
+      next[userId] = isChecked ? null : "MEMBER"; // ✅ default role
       return next;
     });
   };
 
   const changeRole = (userId: string, role: ProjectMemberRole) => {
-    setSelected((prev) => ({ ...prev, [userId]: role }));
+    setSelected((prev) => ({ ...prev, [userId]: normalizeRole(role) }));
   };
 
   // ✅ sync members ในโหมด edit (diff)
   const applyMembersDiff = async (projectId: string) => {
     const before = new Map<string, ProjectMemberRole>();
-    initialMembers.forEach((m) => before.set(m.id, m.role));
+    initialMembers.forEach((m) => before.set(m.id, normalizeRole(m.role)));
 
     const after = new Map<string, ProjectMemberRole>();
-    Object.entries(selected).forEach(([uid, role]) => after.set(uid, role));
+    // ✅ แก้: ข้าม role ที่เป็น null (ติ๊กออก)
+    Object.entries(selected).forEach(([uid, role]) => {
+      if (role == null) return;
+      after.set(uid, normalizeRole(role));
+    });
 
     const toAdd: Array<{ userId: string; role: ProjectMemberRole }> = [];
     const toRemove: string[] = [];
@@ -263,7 +277,6 @@ function ProjectModalInner({
     }
 
     await Promise.all([
-      // ✅ ใช้ POST /members (no-auth)
       ...toAdd.map((p) => addProjectMember(projectId, p)),
       ...toRemove.map((uid) => removeProjectMember(projectId, uid)),
       ...toUpdateRole.map((p) => updateProjectMemberRole(projectId, p.userId, p.role)),
@@ -272,16 +285,25 @@ function ProjectModalInner({
     const fresh = await fetchProjectMembers(projectId);
     setInitialMembers(fresh ?? []);
 
-    const next: Record<string, ProjectMemberRole> = {};
-    (fresh ?? []).forEach((m) => (next[m.id] = m.role ?? "DEVELOPER"));
+    const next: Record<string, ProjectMemberRole | null> = {};
+    (fresh ?? []).forEach((m) => {
+      next[m.id] = normalizeRole(m.role);
+    });
     setSelected(next);
   };
 
   // ✅ add members ในโหมด create (เพิ่มอย่างเดียว)
   const applyMembersForCreate = async (projectId: string) => {
-    const toAdd = Object.entries(selected).map(([userId, role]) => ({ userId, role }));
+    // ✅ แก้: ข้าม role ที่เป็น null (ติ๊กออก)
+    const toAdd = Object.entries(selected)
+      .filter(([, role]) => role != null)
+      .map(([userId, role]) => ({
+        userId,
+        role: normalizeRole(role as ProjectMemberRole),
+      }));
+
     if (toAdd.length === 0) return;
-    await Promise.all(toAdd.map((p) => addProjectMember(projectId, p))); // ✅ no-auth
+    await Promise.all(toAdd.map((p) => addProjectMember(projectId, p)));
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -332,8 +354,6 @@ function ProjectModalInner({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
-      <div id="datepicker-portal" />
-
       <div className="w-full max-w-3xl max-h-[85vh] overflow-auto rounded-2xl bg-white shadow-xl border border-slate-200 p-6 md:p-8">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-900">
@@ -388,7 +408,10 @@ function ProjectModalInner({
               placeholder="ECOM"
               value={form.trelloTag}
               onChange={(e) =>
-                setForm((p) => ({ ...p, trelloTag: e.target.value.toUpperCase().replace(/\s+/g, "") }))
+                setForm((p) => ({
+                  ...p,
+                  trelloTag: e.target.value.toUpperCase().replace(/\s+/g, ""),
+                }))
               }
               onBlur={() => setTouchedTag(true)}
               required={!isEdit}
@@ -426,48 +449,31 @@ function ProjectModalInner({
             <div />
           </div>
 
+          {/* ✅ เปลี่ยน UI วันที่ ให้ใช้ AppDatePicker กลาง */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">วันที่เริ่ม</label>
-              <DatePicker
-                selected={form.startDate}
+              <AppDatePicker
+                value={form.startDate}
                 onChange={(d) => setForm((p) => ({ ...p, startDate: d }))}
-                dateFormat="dd/MM/yyyy"
-                locale={th}
-                placeholderText="วัน/เดือน/ปี"
-                showMonthDropdown
-                showYearDropdown
-                dropdownMode="select"
-                className={inputClass}
-                popperPlacement="bottom-start"
-                withPortal
-                portalId="datepicker-portal"
+                placeholder="วัน/เดือน/ปี"
                 disabled={submitting}
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">วันที่สิ้นสุด</label>
-              <DatePicker
-                selected={form.dueDate}
+              <AppDatePicker
+                value={form.dueDate}
                 onChange={(d) => setForm((p) => ({ ...p, dueDate: d }))}
-                dateFormat="dd/MM/yyyy"
-                locale={th}
-                placeholderText="วัน/เดือน/ปี"
-                showMonthDropdown
-                showYearDropdown
-                dropdownMode="select"
+                placeholder="วัน/เดือน/ปี"
                 minDate={form.startDate ?? undefined}
-                className={inputClass}
-                popperPlacement="bottom-start"
-                withPortal
-                portalId="datepicker-portal"
                 disabled={submitting}
               />
             </div>
           </div>
 
-          {/* ✅ สมาชิก: ไม่มี Preview แล้ว */}
+          {/* ✅ สมาชิก */}
           <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -477,7 +483,8 @@ function ProjectModalInner({
                 </div>
               </div>
               <div className="text-xs text-slate-500">
-                เลือกแล้ว {Object.keys(selected).length} คน
+                เลือกแล้ว{" "}
+                {Object.values(selected).filter((v) => v != null).length} คน
               </div>
             </div>
 
@@ -508,7 +515,12 @@ function ProjectModalInner({
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {filteredUsers.map((u) => {
-                      const checked = !!selected[u.id];
+                      // ✅ แก้: checked ต้องดูว่าเป็น null ไหม
+                      const checked = selected[u.id] != null;
+
+                      const safeValue = checked
+                        ? normalizeRole(selected[u.id] as ProjectMemberRole)
+                        : "MEMBER";
 
                       return (
                         <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50">
@@ -526,7 +538,9 @@ function ProjectModalInner({
                             </span>
 
                             <div className="min-w-0">
-                              <div className="text-sm font-medium text-slate-900 truncate">{u.name}</div>
+                              <div className="text-sm font-medium text-slate-900 truncate">
+                                {u.name}
+                              </div>
                               <div className="text-xs text-slate-500 truncate">{u.email}</div>
                             </div>
                           </label>
@@ -534,9 +548,10 @@ function ProjectModalInner({
                           {checked ? (
                             <select
                               className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                              value={selected[u.id]}
+                              value={safeValue}
                               onChange={(e) => changeRole(u.id, e.target.value as ProjectMemberRole)}
                               disabled={submitting}
+                              title="Role"
                             >
                               {ROLE_OPTIONS.map((r) => (
                                 <option key={r.value} value={r.value}>

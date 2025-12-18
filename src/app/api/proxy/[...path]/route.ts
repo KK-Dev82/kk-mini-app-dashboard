@@ -1,22 +1,50 @@
+// src/app/api/proxy/[...path]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || ""; // https://xxxx.ngrok-free.app/api
+const BASE = process.env.NEXT_PUBLIC_API_BASE_URL || ""; // เช่น https://xxxx.ngrok-free.app
 
 function joinUrl(base: string, path: string) {
   return base.replace(/\/+$/, "") + "/" + path.replace(/^\/+/, "");
 }
 
 function getProxyPath(req: NextRequest, paramsPath: unknown) {
-  // 1) จาก params (กรณี catch-all ทำงานปกติ)
   if (Array.isArray(paramsPath)) return paramsPath.join("/");
   if (typeof paramsPath === "string") return paramsPath;
+  return req.nextUrl.pathname.replace(/^\/api\/proxy\/?/, "");
+}
 
-  // 2) fallback: ดึงจาก URL จริง (กัน params หลุด)
-  // /api/proxy/projects -> projects
-  const p = req.nextUrl.pathname.replace(/^\/api\/proxy\/?/, "");
-  return p;
+/**
+ * ✅ บังคับใช้ ENV token เป็นหลัก
+ * priority: env -> header -> cookie
+ *
+ * ถ้าต้องการ "ใช้ env เสมอ" แบบไม่สน header/cookie เลย:
+ * - ตั้งค่า FORCE_ENV_TOKEN = true
+ */
+const FORCE_ENV_TOKEN = true;
+
+function pickToken(req: NextRequest) {
+  const envToken = (process.env.API_TOKEN ?? "").trim();
+
+  const headerAuth = req.headers.get("authorization") ?? "";
+  const headerToken = headerAuth.toLowerCase().startsWith("bearer ")
+    ? headerAuth.slice(7).trim()
+    : "";
+
+  const cookieToken = req.cookies.get("access_token")?.value ?? "";
+
+  if (FORCE_ENV_TOKEN && envToken) {
+    return { token: envToken, source: "env" as const };
+  }
+
+  // ✅ priority: env -> header -> cookie
+  const token = envToken || headerToken || cookieToken;
+
+  return {
+    token,
+    source: envToken ? ("env" as const) : headerToken ? ("header" as const) : cookieToken ? ("cookie" as const) : ("none" as const),
+  };
 }
 
 async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
@@ -31,31 +59,31 @@ async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   const qs = req.nextUrl.search || "";
   const targetUrl = joinUrl(BASE, path) + qs;
 
-  // ---- headers ----
   const headers = new Headers(req.headers);
 
-  // ล้าง header ที่ไม่ควรส่งไป upstream
+  // headers ที่ไม่ควรส่ง
   headers.delete("host");
   headers.delete("content-length");
 
-  // ✅ ข้าม ngrok warning
+  // ngrok + json
   headers.set("ngrok-skip-browser-warning", "true");
-  headers.set("Accept", "application/json");
+  headers.set("accept", "application/json");
 
-  // ✅ สำคัญ: อ่าน token จาก HttpOnly cookie แล้วแนบ Authorization ให้ upstream
-  // - ใน NextRequest คุณอ่าน cookie ได้แบบนี้
-  const token = req.cookies.get("access_token")?.value;
+  // ✅ เลือก token
+  const { token, source } = pickToken(req);
 
-  // กัน client ส่ง Authorization แปลก ๆ มาเอง
+  // กัน client ส่ง Authorization แปลก ๆ / กัน cookie มาทับ
   headers.delete("authorization");
 
   if (token) {
     headers.set("authorization", `Bearer ${token}`);
   }
 
-  // ---- body ----
+  // ส่ง body เฉพาะ method ที่มี body
   const body =
-    req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+    req.method === "GET" || req.method === "HEAD"
+      ? undefined
+      : await req.arrayBuffer();
 
   const upstream = await fetch(targetUrl, {
     method: req.method,
@@ -67,24 +95,14 @@ async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   const ct = upstream.headers.get("content-type") || "";
   const raw = await upstream.text();
 
-  // ถ้าเป็น HTML = มักเป็น swagger/warning
-  if (ct.includes("text/html")) {
-    return NextResponse.json(
-      {
-        error: "Upstream returned HTML (not JSON)",
-        targetUrl,
-        contentType: ct,
-        sample: raw.slice(0, 300),
-      },
-      { status: 502 }
-    );
-  }
-
-  // ส่งกลับ JSON (หรือ text) ตามจริง
-  // NOTE: คง content-type เดิมไว้
+  // ✅ ตอบกลับพร้อม debug header
   return new NextResponse(raw, {
     status: upstream.status,
-    headers: { "content-type": ct || "application/json" },
+    headers: {
+      "content-type": ct || "application/json",
+      "x-proxy-auth-source": source,          // env/header/cookie/none
+      "x-proxy-has-auth": token ? "1" : "0",  // 1/0
+    },
   });
 }
 

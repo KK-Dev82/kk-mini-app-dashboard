@@ -64,7 +64,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [activeCard, setActiveCard] = useState<TrelloCard | null>(null);
 
-  // ✅ loaders กลาง (แทน setLoadingXXX)
+  // ✅ loaders กลาง
   const listsLoader = useAsyncLoader();
   const cardsLoader = useAsyncLoader();
   const membersLoader = useAsyncLoader();
@@ -79,14 +79,24 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   });
   const [dragging, setDragging] = useState(false);
 
-  // ✅ สำคัญ: handle update จาก modal (เอาไว้แก้ error onUpdated + sync UI)
+  // ✅ reload cards (แทน F5)
+  const reloadCards = async () => {
+    const data = await fetchTrelloCardsByTag(projectTag);
+    const next = (data ?? []).filter((c) => !c.closed);
+    setCards(next);
+
+    // ✅ sync activeCard ถ้ากำลังเปิดอยู่
+    setActiveCard((prev) => {
+      if (!prev?.id) return prev;
+      return next.find((x) => x.id === prev.id) ?? prev;
+    });
+  };
+
+  // ✅ สำคัญ: handle update แบบ “เร็ว” (ใช้ตอนอยาก patch เฉพาะบาง field)
   const handleCardUpdated = (updated: TrelloCard) => {
     if (!updated?.id) return;
 
-    // อัปเดตใน list cards
     setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-
-    // ถ้ากำลังเปิดการ์ดใบนี้อยู่ ให้ sync ด้วย
     setActiveCard((prev) => (prev?.id === updated.id ? updated : prev));
   };
 
@@ -127,9 +137,9 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectTag]); // ✅ สำคัญ
+  }, [projectTag]);
 
-  // โหลด members (เก็บเป็น TrelloMember จริง)
+  // โหลด members
   useEffect(() => {
     let cancelled = false;
 
@@ -148,7 +158,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ แปลงเป็นรูปแบบที่ TaskModal ต้องใช้
+  // แปลงเป็นรูปแบบที่ TaskModal ต้องใช้
   const modalMembers: ModalMember[] = useMemo(() => {
     return (members ?? []).map((m) => ({
       id: m.id,
@@ -204,7 +214,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     return node.closest<HTMLElement>("[data-col-scroll]");
   };
 
-  // wheel แนวตั้ง -> เลื่อนแนวนอน (แต่ถ้าอยู่ใน list การ์ด ให้คอลัมน์ scroll เอง)
+  // wheel แนวตั้ง -> เลื่อนแนวนอน
   const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -258,7 +268,6 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     } catch {}
   };
 
-  // ✅ overlay โหลดรวม (ถ้ากำลังโหลด members ด้วยก็โชว์)
   const showOverlay = loading || membersLoader.loading;
 
   return (
@@ -278,7 +287,6 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
           ].join(" ")}
           style={{ touchAction: "pan-y" }}
         >
-          {/* ✅ items-start กันคอลัมน์ยืดตามกัน */}
           <div className="inline-flex w-max items-start gap-4 px-6">
             {(lists ?? []).map((list) => {
               const listCards = groupedByListId[list.id] ?? [];
@@ -305,7 +313,6 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
                     </button>
                   </div>
 
-                  {/* ✅ ถ้าการ์ดเยอะ คอลัมน์ scroll ของตัวเอง */}
                   <div
                     className="mt-3 space-y-2 pr-1 overflow-y-auto max-h-[calc(100vh-340px)]"
                     data-col-scroll
@@ -346,9 +353,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
             })}
 
             {!loading && lists.length === 0 && (
-              <div className="text-sm text-slate-400">
-                ไม่พบคอลัมน์จาก Trello
-              </div>
+              <div className="text-sm text-slate-400">ไม่พบคอลัมน์จาก Trello</div>
             )}
           </div>
         </div>
@@ -367,15 +372,13 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         card={activeCard}
         members={members}
         projectTag={projectTag}
-        lists={lists} // ✅ ส่ง lists ไปให้ dropdown column
-        onUpdated={handleCardUpdated} // ✅ สำคัญ
+        lists={lists}
+        onUpdated={handleCardUpdated}
+        // ✅ สำคัญ: หลังบันทึก ให้ refetch cards ใหม่ (แทน F5)
+        onReload={reloadCards}
       />
 
-      {/* ✅ Loading Overlay สวย ๆ ใช้ร่วมทุกหน้าได้ */}
-      <PageLoadingOverlay
-        show={showOverlay}
-        label="กำลังโหลด Project Tasks..."
-      />
+      <PageLoadingOverlay show={showOverlay} label="กำลังโหลด Project Tasks..." />
     </>
   );
 }

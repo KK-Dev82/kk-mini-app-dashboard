@@ -7,6 +7,7 @@ import type { ProjectListItem, ProjectMemberApi } from "../../../lib/projectServ
 import {
   projectStatusBadgeClass,
   projectStatusLabelTH,
+  fetchProjectMembers, // ✅ เพิ่ม
 } from "../../../lib/projectService";
 import {
   EllipsisHorizontalIcon,
@@ -17,7 +18,7 @@ import {
 
 type Props = {
   project: ProjectListItem;
-  members?: ProjectMemberApi[]; // ✅ เพิ่ม
+  members?: ProjectMemberApi[]; // ✅ เผื่อ parent ส่งมา (fallback)
   onEdit?: (project: ProjectListItem) => void;
 };
 
@@ -49,6 +50,11 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
   const range = dateRange(project.startDate, project.dueDate);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // ✅ members (โหลดเองจาก API)
+  const [membersData, setMembersData] = useState<ProjectMemberApi[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState("");
+
   // ปิดเมนูเมื่อคลิกข้างนอก / กด ESC
   useEffect(() => {
     if (!menuOpen) return;
@@ -76,17 +82,49 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
     };
   }, [menuOpen]);
 
+  // ✅ โหลดสมาชิกเมื่อ card แสดง / project เปลี่ยน
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMembers() {
+      setMembersLoading(true);
+      setMembersError("");
+
+      try {
+        const res = await fetchProjectMembers(project.id);
+        if (cancelled) return;
+        setMembersData(res ?? []);
+      } catch (e) {
+        if (cancelled) return;
+        setMembersError(e instanceof Error ? e.message : "โหลดสมาชิกไม่สำเร็จ");
+        setMembersData([]);
+      } finally {
+        if (cancelled) return;
+        setMembersLoading(false);
+      }
+    }
+
+    if (project?.id) loadMembers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [project?.id]);
+
+  // ✅ ถ้า parent ส่ง members มาแล้ว ให้ใช้ของ parent แทนได้ (optional)
+  const effectiveMembers = membersData.length ? membersData : members;
+
   const memberDisplay = useMemo(() => {
-    const list = (members ?? [])
+    const list = (effectiveMembers ?? [])
       .map((m) => ({
         id: m.id,
-        name: (m as any).name as string | undefined, // เผื่อ backend มี name
-        email: (m as any).email as string | undefined, // เผื่อ backend มี email
+        name: (m as any).name as string | undefined,
+        email: (m as any).email as string | undefined,
       }))
       .filter((m) => m.id);
 
     return list;
-  }, [members]);
+  }, [effectiveMembers]);
 
   const show = memberDisplay.slice(0, 3);
   const extra = Math.max(0, memberDisplay.length - show.length);
@@ -132,7 +170,12 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
             {/* ✅ สมาชิกในโปรเจกต์ */}
             <div className="mt-1 inline-flex items-center gap-2 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 border border-slate-200">
               <UserGroupIcon className="h-4 w-4" />
-              {memberDisplay.length === 0 ? (
+
+              {membersLoading ? (
+                <span className="text-slate-400">กำลังโหลด…</span>
+              ) : membersError ? (
+                <span className="text-red-500">โหลดสมาชิกไม่สำเร็จ</span>
+              ) : memberDisplay.length === 0 ? (
                 <span className="text-slate-400">ยังไม่มีสมาชิก</span>
               ) : (
                 <div className="inline-flex items-center gap-1">
@@ -153,9 +196,7 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
                     ) : null}
                   </div>
 
-                  <span className="ml-1 text-slate-600">
-                    {memberDisplay.length} คน
-                  </span>
+                  <span className="ml-1 text-slate-600">{memberDisplay.length} คน</span>
                 </div>
               )}
             </div>

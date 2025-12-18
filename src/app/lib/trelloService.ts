@@ -70,8 +70,7 @@ export type TrelloMember = {
 
 /* ----------------------------- APIs ----------------------------- */
 
-export const fetchTrelloMembers = () =>
-  apiGet<TrelloMember[]>("/trello/members");
+export const fetchTrelloMembers = () => apiGet<TrelloMember[]>("/trello/members");
 
 /** ✅ GET /trello/cards/tag/{tag} */
 export async function fetchTrelloCardsByTag(tag: string): Promise<TrelloCard[]> {
@@ -118,3 +117,69 @@ export async function updateTrelloCard(
 
 /** ✅ GET /trello/lists */
 export const fetchTrelloLists = () => apiGet<TrelloList[]>("/trello/lists");
+
+/* ----------------------------- Member Assign ----------------------------- */
+/**
+ * ✅ POST /trello/cards/{cardId}/assign
+ * (ตาม swagger ที่คุณส่งมา)
+ */
+export async function assignTrelloMember(cardId: string, memberId: string) {
+  const cid = (cardId ?? "").trim();
+  const mid = (memberId ?? "").trim();
+  if (!cid) throw new Error("Missing cardId");
+  if (!mid) throw new Error("Missing memberId");
+
+  // ถ้า backend ของคุณไม่รับ body ให้เปลี่ยนเป็น:
+  // return apiPost<any>(`/trello/cards/${encodeURIComponent(cid)}/assign?memberId=${encodeURIComponent(mid)}`);
+  return apiPost<any>(`/trello/cards/${encodeURIComponent(cid)}/assign`, {
+    memberId: mid,
+  });
+}
+
+/**
+ * ✅ เผื่อมีเส้นลบสมาชิก (ตอนนี้ของคุณยัง 404)
+ * POST /trello/cards/{cardId}/unassign
+ */
+export async function unassignTrelloMember(cardId: string, memberId: string) {
+  const cid = (cardId ?? "").trim();
+  const mid = (memberId ?? "").trim();
+  if (!cid) throw new Error("Missing cardId");
+  if (!mid) throw new Error("Missing memberId");
+
+  return apiPost<any>(`/trello/cards/${encodeURIComponent(cid)}/unassign`, {
+    memberId: mid,
+  });
+}
+
+/* ----------------------------- Checklist Update ----------------------------- */
+/**
+ * ✅ PUT /trello/cards/{cardId}/checklist/{checkItemId}
+ * Update checklist item state (complete/incomplete)
+ */
+export type ChecklistItemState = "complete" | "incomplete";
+
+export async function updateChecklistItemState(
+  cardId: string,
+  checkItemId: string,
+  state: ChecklistItemState
+) {
+  const cid = (cardId ?? "").trim();
+  const iid = (checkItemId ?? "").trim();
+  if (!cid) throw new Error("Missing cardId");
+  if (!iid) throw new Error("Missing checkItemId");
+  if (state !== "complete" && state !== "incomplete") {
+    throw new Error("Invalid checklist state");
+  }
+
+  // ✅ default: ส่งแบบ body (ส่วนใหญ่ backend ทำแบบนี้)
+  return apiPut<any>(
+    `/trello/cards/${encodeURIComponent(cid)}/checklist/${encodeURIComponent(iid)}`,
+    { state }
+  );
+
+  // ❗ ถ้า backend ของคุณไม่รับ body แล้วต้องรับ query ให้ใช้แบบนี้แทน:
+  // return apiPut<any>(
+  //   `/trello/cards/${encodeURIComponent(cid)}/checklist/${encodeURIComponent(iid)}?state=${encodeURIComponent(state)}`,
+  //   undefined as any
+  // );
+}

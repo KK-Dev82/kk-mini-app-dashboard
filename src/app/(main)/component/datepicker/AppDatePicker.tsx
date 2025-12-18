@@ -1,73 +1,72 @@
 "use client";
 
-import { useEffect } from "react";
 import DatePicker from "react-datepicker";
 import { th } from "date-fns/locale";
 import styles from "./AppDatePicker.module.css";
 
 type Props = {
   label?: string;
-  value: Date | null;
-  onChange: (d: Date | null) => void;
-
-  minDate?: Date;
+  value?: Date | null;
   placeholder?: string;
+  selected?: Date | null;
+  placeholderText?: string;
+  onChange: (d: Date | null) => void;
+  minDate?: Date;
+  maxDate?: Date;
   disabled?: boolean;
-
-  className?: string; // เผื่ออยากเติม class เพิ่ม
+  className?: string;
 };
-
-const PORTAL_ID = "datepicker-portal";
-
-function ensurePortal() {
-  if (typeof document === "undefined") return;
-  if (document.getElementById(PORTAL_ID)) return;
-  const el = document.createElement("div");
-  el.id = PORTAL_ID;
-  document.body.appendChild(el);
-}
 
 export default function AppDatePicker({
   label,
   value,
+  selected,
   onChange,
   minDate,
+  maxDate,
   placeholder = "วัน/เดือน/ปี",
+  placeholderText,
   disabled,
   className = "",
 }: Props) {
-  useEffect(() => {
-    ensurePortal();
-  }, []);
+  const picked = selected ?? value ?? null;
+
+  const ph = placeholderText ?? placeholder ?? "วัน/เดือน/ปี";
 
   const inputClass =
-    "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white outline-none " +
-    "focus:border-blue-500 focus:ring-1 focus:ring-blue-500 " +
-    (disabled ? "opacity-60 cursor-not-allowed " : "") +
-    className;
+    [
+      "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm",
+      "bg-white text-slate-900 placeholder:text-slate-400",
+      "outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500",
+      disabled ? "opacity-60 cursor-not-allowed" : "",
+      className,
+    ]
+      .filter(Boolean)
+      .join(" ");
 
   return (
     <div className="space-y-1">
-      {label ? <label className="text-xs font-medium text-slate-700">{label}</label> : null}
+      {label ? (
+        <label className="text-xs font-medium text-slate-700">{label}</label>
+      ) : null}
 
       <DatePicker
-        selected={value}
+        selected={picked}
         onChange={(d) => onChange(d)}
-        dateFormat="dd/MM/yyyy"         // ✅ วัน/เดือน/ปี
-        locale={th}                     // ✅ ภาษาไทย (เดือน/วัน)
-        placeholderText={placeholder}
+        dateFormat="dd/MM/yyyy"
+        locale={th}
+        placeholderText={ph}
         showMonthDropdown
-        showYearDropdown                // ✅ เลือกปีได้
+        showYearDropdown
         dropdownMode="select"
         minDate={minDate}
+        maxDate={maxDate}
         disabled={disabled}
         wrapperClassName="w-full"
         className={inputClass}
-        calendarClassName="app-dp"
+        calendarClassName={styles.calendar}
         popperClassName={styles.popper}
         popperPlacement="bottom-start"
-        withPortal
-        portalId={PORTAL_ID}
       />
     </div>
   );

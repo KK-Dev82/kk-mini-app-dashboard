@@ -7,20 +7,23 @@ const joinUrl = (...parts: string[]) =>
     .map((p, i) => (i === 0 ? p.replace(/\/+$/, "") : p.replace(/^\/+/, "")))
     .join("/");
 
-// ✅ เพิ่ม: ดึง token จาก storage
+// ✅ เพิ่ม: ดึง token จาก storage (ถ้าคุณมี login เก็บไว้)
 function getStoredToken() {
   if (typeof window === "undefined") return "";
   return localStorage.getItem("accessToken") ?? ""; // <- เปลี่ยน key ให้ตรงของคุณ
 }
 
+type ApiOptions = {
+  token?: string;
+  noAuth?: boolean; // ✅ เพิ่มจริง
+  headers?: Record<string, string>;
+};
+
 async function apiRequest<T>(
   path: string,
   method: HttpMethod,
   body?: unknown,
-  options?: {
-    token?: string;
-    headers?: Record<string, string>;
-  }
+  options?: ApiOptions
 ) {
   const url = joinUrl("/api/proxy", path);
 
@@ -31,9 +34,11 @@ async function apiRequest<T>(
 
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  // ✅ เปลี่ยน: ถ้าไม่ได้ส่ง token มา ให้ใช้ token จาก localStorage แทน
-  const token = options?.token ?? getStoredToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // ✅ แนบ Authorization เฉพาะเมื่อไม่ตั้ง noAuth
+  if (!options?.noAuth) {
+    const token = options?.token ?? getStoredToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+  }
 
   const res = await fetch(url, {
     method,
@@ -54,17 +59,17 @@ async function apiRequest<T>(
     : (raw as T);
 }
 
-export const apiGet = <T>(path: string, options?: { token?: string }) =>
+export const apiGet = <T>(path: string, options?: ApiOptions) =>
   apiRequest<T>(path, "GET", undefined, options);
 
-export const apiPost = <T>(path: string, body: unknown, options?: { token?: string }) =>
+export const apiPost = <T>(path: string, body: unknown, options?: ApiOptions) =>
   apiRequest<T>(path, "POST", body, options);
 
-export const apiPut = <T>(path: string, body: unknown, options?: { token?: string }) =>
+export const apiPut = <T>(path: string, body: unknown, options?: ApiOptions) =>
   apiRequest<T>(path, "PUT", body, options);
 
-export const apiPatch = <T>(path: string, body: unknown, options?: { token?: string }) =>
+export const apiPatch = <T>(path: string, body: unknown, options?: ApiOptions) =>
   apiRequest<T>(path, "PATCH", body, options);
 
-export const apiDelete = <T>(path: string, options?: { token?: string }) =>
+export const apiDelete = <T>(path: string, options?: ApiOptions) =>
   apiRequest<T>(path, "DELETE", undefined, options);
