@@ -7,7 +7,7 @@ import type { ProjectListItem, ProjectMemberApi } from "../../../lib/projectServ
 import {
   projectStatusBadgeClass,
   projectStatusLabelTH,
-  fetchProjectMembers, // ✅ เพิ่ม
+  fetchProjectMembers,
 } from "../../../lib/projectService";
 import {
   EllipsisHorizontalIcon,
@@ -18,8 +18,11 @@ import {
 
 type Props = {
   project: ProjectListItem;
-  members?: ProjectMemberApi[]; // ✅ เผื่อ parent ส่งมา (fallback)
+  members?: ProjectMemberApi[];
   onEdit?: (project: ProjectListItem) => void;
+
+  // ✅ เพิ่ม: soft delete / restore
+  onToggleActive?: (project: ProjectListItem) => void;
 };
 
 function fmtShortTH(dateStr?: string | null) {
@@ -46,7 +49,12 @@ function avatarText(name?: string | null, email?: string | null) {
   return ch;
 }
 
-export default function ProjectCard({ project, members = [], onEdit }: Props) {
+export default function ProjectCard({
+  project,
+  members = [],
+  onEdit,
+  onToggleActive,
+}: Props) {
   const range = dateRange(project.startDate, project.dueDate);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -62,10 +70,7 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
     const onDocClick = (e: MouseEvent) => {
       const t = e.target as HTMLElement | null;
       if (!t) return;
-      if (
-        t.closest?.("[data-project-menu]") ||
-        t.closest?.("[data-project-menu-btn]")
-      )
+      if (t.closest?.("[data-project-menu]") || t.closest?.("[data-project-menu-btn]"))
         return;
       setMenuOpen(false);
     };
@@ -130,7 +135,12 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
   const extra = Math.max(0, memberDisplay.length - show.length);
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 flex items-start justify-between">
+    <div
+      className={[
+        "rounded-2xl border border-slate-200 bg-white px-5 py-4 flex items-start justify-between",
+        project.isActive ? "" : "opacity-60",
+      ].join(" ")}
+    >
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
           <FolderIcon className="h-5 w-5" />
@@ -146,11 +156,14 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
             </Link>
 
             {project.status ? (
-              <span
-                className={projectStatusBadgeClass(project.status)}
-                title={project.status}
-              >
+              <span className={projectStatusBadgeClass(project.status)} title={project.status}>
                 {projectStatusLabelTH(project.status)}
+              </span>
+            ) : null}
+
+            {!project.isActive ? (
+              <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium bg-slate-100 text-slate-700 border-slate-200">
+                Archived
               </span>
             ) : null}
           </div>
@@ -218,7 +231,7 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
         {menuOpen && (
           <div
             data-project-menu
-            className="absolute right-0 mt-2 w-40 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden z-20"
+            className="absolute right-0 mt-2 w-52 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden z-20"
           >
             <button
               type="button"
@@ -230,6 +243,32 @@ export default function ProjectCard({ project, members = [], onEdit }: Props) {
               className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
               แก้ไข
+            </button>
+
+            <div className="h-px bg-slate-100" />
+
+            <button
+              type="button"
+              disabled={!onToggleActive}
+              onClick={() => {
+                setMenuOpen(false);
+                if (!onToggleActive) return;
+
+                const ok = window.confirm(
+                  project.isActive
+                    ? `ต้องการเก็บโปรเจกต์ "${project.name}" เข้า Archive ใช่ไหม?\n(สามารถกู้คืนได้ภายหลัง)`
+                    : `ต้องการกู้คืนโปรเจกต์ "${project.name}" ใช่ไหม?`
+                );
+                if (!ok) return;
+
+                onToggleActive(project);
+              }}
+              className={[
+                "w-full px-3 py-2 text-left text-sm hover:bg-slate-50 disabled:opacity-60",
+                project.isActive ? "text-red-600" : "text-emerald-700",
+              ].join(" ")}
+            >
+              {project.isActive ? "เก็บเข้า Archive" : "กู้คืนโปรเจกต์"}
             </button>
           </div>
         )}

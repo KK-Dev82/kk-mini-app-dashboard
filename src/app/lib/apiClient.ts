@@ -7,15 +7,21 @@ const joinUrl = (...parts: string[]) =>
     .map((p, i) => (i === 0 ? p.replace(/\/+$/, "") : p.replace(/^\/+/, "")))
     .join("/");
 
-// ✅ เพิ่ม: ดึง token จาก storage (ถ้าคุณมี login เก็บไว้)
+// ✅ เดิม: ดึง token จาก storage (เผื่อมี login จริงในอนาคต)
 function getStoredToken() {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("accessToken") ?? ""; // <- เปลี่ยน key ให้ตรงของคุณ
+  return localStorage.getItem("accessToken") ?? "";
 }
 
 type ApiOptions = {
   token?: string;
-  noAuth?: boolean; // ✅ เพิ่มจริง
+
+  /** ✅ ไม่ต้องแนบ auth เลย (สำหรับ endpoint public) */
+  noAuth?: boolean;
+
+  /** ✅ บังคับให้ proxy ใช้ API_TOKEN จาก env (server-side) */
+  useEnvToken?: boolean;
+
   headers?: Record<string, string>;
 };
 
@@ -34,10 +40,18 @@ async function apiRequest<T>(
 
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
-  // ✅ แนบ Authorization เฉพาะเมื่อไม่ตั้ง noAuth
-  if (!options?.noAuth) {
-    const token = options?.token ?? getStoredToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
+  // ✅ สั่ง proxy ว่า "ไม่ต้อง auth"
+  if (options?.noAuth) {
+    headers["x-no-auth"] = "1";
+  } else {
+    // ✅ สั่ง proxy ว่า "ให้ใช้ token จาก env"
+    if (options?.useEnvToken) {
+      headers["x-use-env-token"] = "1";
+    } else {
+      // ✅ แนบ auth จาก client เฉพาะกรณีไม่ได้สั่งใช้ env token
+      const token = options?.token ?? getStoredToken();
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
   }
 
   const res = await fetch(url, {

@@ -114,6 +114,12 @@ function avatarText(name?: string | null, email?: string | null) {
   return (name?.[0] || email?.[0] || "?").toUpperCase();
 }
 
+// ✅ helper: ดึง userId จาก ProjectMemberApi (กัน schema ต่างกัน)
+function getMemberUserId(m: ProjectMemberApi): string | undefined {
+  const anyM = m as any;
+  return anyM.userId ?? anyM.user?.id ?? anyM.user?.userId ?? anyM.idUser;
+}
+
 function ProjectModalInner({
   initial,
   onClose,
@@ -137,7 +143,7 @@ function ProjectModalInner({
 
   const [allUsers, setAllUsers] = useState<UserApi[]>([]);
   const [initialMembers, setInitialMembers] = useState<ProjectMemberApi[]>([]);
-  // ✅ แก้: เก็บ null เพื่อ "ติ๊กออก" โดยไม่ลบ key (กัน UI หาย)
+  // ✅ เก็บ null เพื่อ "ติ๊กออก" โดยไม่ลบ key (กัน UI หาย)
   const [selected, setSelected] = useState<Record<string, ProjectMemberRole | null>>({});
   const [userQuery, setUserQuery] = useState("");
 
@@ -180,7 +186,7 @@ function ProjectModalInner({
     };
   }, []);
 
-  // ถ้า edit: โหลด members เดิมมา sync เข้า selected
+  // ✅ ถ้า edit: โหลด members เดิมมา sync เข้า selected (ใช้ userId ไม่ใช่ memberId)
   useEffect(() => {
     if (!isEdit || !initial?.id) return;
 
@@ -195,7 +201,8 @@ function ProjectModalInner({
 
         const next: Record<string, ProjectMemberRole | null> = {};
         (members ?? []).forEach((m) => {
-          next[m.id] = normalizeRole(m.role);
+          const uid = getMemberUserId(m);
+          if (uid) next[uid] = normalizeRole(m.role);
         });
         setSelected(next);
       })
@@ -235,7 +242,7 @@ function ProjectModalInner({
     });
   }, [allUsers, userQuery]);
 
-  // ✅ แก้: ไม่ delete key แล้ว แต่ set เป็น null แทน (ติ๊กออก)
+  // ✅ ไม่ delete key แล้ว แต่ set เป็น null แทน (ติ๊กออก)
   const toggleUser = (userId: string) => {
     setSelected((prev) => {
       const next = { ...prev };
@@ -249,15 +256,17 @@ function ProjectModalInner({
     setSelected((prev) => ({ ...prev, [userId]: normalizeRole(role) }));
   };
 
-  // ✅ sync members ในโหมด edit (diff)
+  // ✅ sync members ในโหมด edit (diff) — before/after ใช้ userId เหมือนกัน
   const applyMembersDiff = async (projectId: string) => {
     const before = new Map<string, ProjectMemberRole>();
-    initialMembers.forEach((m) => before.set(m.id, normalizeRole(m.role)));
+    initialMembers.forEach((m) => {
+      const uid = getMemberUserId(m);
+      if (uid) before.set(uid, normalizeRole(m.role));
+    });
 
     const after = new Map<string, ProjectMemberRole>();
-    // ✅ แก้: ข้าม role ที่เป็น null (ติ๊กออก)
     Object.entries(selected).forEach(([uid, role]) => {
-      if (role == null) return;
+      if (role == null) return; // ติ๊กออก
       after.set(uid, normalizeRole(role));
     });
 
@@ -282,26 +291,17 @@ function ProjectModalInner({
       ...toUpdateRole.map((p) => updateProjectMemberRole(projectId, p.userId, p.role)),
     ]);
 
-    const fresh = await fetchProjectMembers(projectId);
-    setInitialMembers(fresh ?? []);
-
-    const next: Record<string, ProjectMemberRole | null> = {};
-    (fresh ?? []).forEach((m) => {
-      next[m.id] = normalizeRole(m.role);
-    });
-    setSelected(next);
+    // ไม่จำเป็นต้อง set state ต่อแล้ว เพราะเราจะ reload หน้า
   };
 
   // ✅ add members ในโหมด create (เพิ่มอย่างเดียว)
   const applyMembersForCreate = async (projectId: string) => {
-    // ✅ แก้: ข้าม role ที่เป็น null (ติ๊กออก)
     const toAdd = Object.entries(selected)
       .filter(([, role]) => role != null)
       .map(([userId, role]) => ({
         userId,
         role: normalizeRole(role as ProjectMemberRole),
       }));
-
     if (toAdd.length === 0) return;
     await Promise.all(toAdd.map((p) => addProjectMember(projectId, p)));
   };
@@ -334,12 +334,17 @@ function ProjectModalInner({
       if (isEdit && initial?.id) {
         await onUpdate?.(initial.id, payload);
         await applyMembersDiff(initial.id);
+
+        // ✅ ปิด modal ก่อน แล้วค่อย reload
         onClose();
+        window.location.reload(); // ✅ รีหน้า 1 ครั้งให้ทุกอย่าง fetch ใหม่
       } else {
         const created = await onCreate?.(payload);
         if (!created?.id) throw new Error("Create success but missing project id");
         await applyMembersForCreate(created.id);
+
         onClose();
+        window.location.reload(); // ✅ รีหน้า 1 ครั้งให้ทุกอย่าง fetch ใหม่
       }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Submit failed");
@@ -370,7 +375,6 @@ function ProjectModalInner({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* fields เดิม */}
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">ชื่อโปรเจกต์</label>
             <input
@@ -449,7 +453,6 @@ function ProjectModalInner({
             <div />
           </div>
 
-          {/* ✅ เปลี่ยน UI วันที่ ให้ใช้ AppDatePicker กลาง */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="space-y-1">
               <label className="text-xs font-medium text-slate-700">วันที่เริ่ม</label>
@@ -473,7 +476,6 @@ function ProjectModalInner({
             </div>
           </div>
 
-          {/* ✅ สมาชิก */}
           <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -483,8 +485,7 @@ function ProjectModalInner({
                 </div>
               </div>
               <div className="text-xs text-slate-500">
-                เลือกแล้ว{" "}
-                {Object.values(selected).filter((v) => v != null).length} คน
+                เลือกแล้ว {Object.values(selected).filter((v) => v != null).length} คน
               </div>
             </div>
 
@@ -515,7 +516,6 @@ function ProjectModalInner({
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {filteredUsers.map((u) => {
-                      // ✅ แก้: checked ต้องดูว่าเป็น null ไหม
                       const checked = selected[u.id] != null;
 
                       const safeValue = checked
@@ -538,9 +538,7 @@ function ProjectModalInner({
                             </span>
 
                             <div className="min-w-0">
-                              <div className="text-sm font-medium text-slate-900 truncate">
-                                {u.name}
-                              </div>
+                              <div className="text-sm font-medium text-slate-900 truncate">{u.name}</div>
                               <div className="text-xs text-slate-500 truncate">{u.email}</div>
                             </div>
                           </label>

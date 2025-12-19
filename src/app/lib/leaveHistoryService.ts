@@ -25,5 +25,5 @@ export type LeaveHistoryResponse = {
 /** ดึงประวัติการลาทั้งหมด (mock API) */
 export async function fetchLeaveHistory(): Promise<LeaveHistoryResponse> {
   // ถ้าไม่มี apiGet ให้ใช้ fetch("/api/leave-history") แทนได้
-  return apiGet<LeaveHistoryResponse>("/api/leave-history");
+  return apiGet<LeaveHistoryResponse>("/api/history");
 }

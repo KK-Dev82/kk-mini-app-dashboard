@@ -8,7 +8,7 @@ import {
   UserGroupIcon,
   ArrowTrendingUpIcon,
 } from "@heroicons/react/24/outline";
-import { fetchTeamAttendance } from "../../../lib/teamAttendanceService";
+// import { fetchTeamAttendance } from "../../../lib/teamAttendanceService";
 
 type AttendanceSummary = {
   onTime: number;

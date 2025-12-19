@@ -6,31 +6,19 @@ import {
   fetchProjectByKey,
   createProject,
   updateProject,
-  // fetchProjectMembers, // ❌ ปิดไว้ก่อน เพราะยัง 401 (ยังไม่ login)
+  toggleProjectActiveStatus,
   type ProjectsResponse,
   type CreateProjectPayload,
   type UpdateProjectPayload,
   type ProjectApi,
   type ProjectListItem,
-  // type ProjectMemberApi,
 } from "../../lib/projectService";
 
 import ProjectCard from "./components/ProjectCard";
 import ProjectModal, { type NewProjectPayload } from "./components/ProjectModal";
-import ProjectFilters, {
-  type ProjectFiltersValue,
-} from "./components/ProjectFilters";
+import ProjectFilters, { type ProjectFiltersValue } from "./components/ProjectFilters";
 
-/**
- * ✅ ไฟล์ LoadingUI.tsx ของคุณ "ไม่มี default export"
- * ต้อง import แบบ named exports
- */
 import { PageLoadingOverlay } from "../component/loading/LoadingUI";
-
-/**
- * ✅ useAsyncLoader ของคุณ ถ้าเป็น named export ให้ใช้แบบนี้
- * (ถ้าไฟล์คุณ export default จริง ค่อยเปลี่ยนเป็น import useAsyncLoader from ...)
- */
 import { useAsyncLoader } from "../component/loading/useAsyncLoader";
 
 function parseISODate(iso?: string | null) {
@@ -52,16 +40,13 @@ function includesText(p: ProjectListItem, q: string) {
 export default function ProjectPage() {
   const [data, setData] = useState<ProjectsResponse | null>(null);
 
-  // create modal
   const [open, setOpen] = useState(false);
 
-  // edit modal
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<ProjectApi | null>(null);
 
   const [saving, setSaving] = useState(false);
 
-  // ✅ loading กลาง (จาก hook ของคุณ)
   const { loading, run } = useAsyncLoader();
 
   const [filters, setFilters] = useState<ProjectFiltersValue>({
@@ -69,9 +54,9 @@ export default function ProjectPage() {
     includeNoDate: true,
     monthFilter: 0,
     yearFilter: 0,
+    showArchived: false, // ✅ true = แสดงเฉพาะ Archived (isActive=false)
   });
 
-  // ✅ โหลดเฉพาะ projects ก่อน (ปิด members ไปก่อนกันแดง 401)
   const load = async () => {
     await run(async () => {
       const projects = await fetchProjects();
@@ -84,9 +69,7 @@ export default function ProjectPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleCreate = async (
-    payload: NewProjectPayload
-  ): Promise<ProjectApi> => {
+  const handleCreate = async (payload: NewProjectPayload): Promise<ProjectApi> => {
     setSaving(true);
     try {
       const body: CreateProjectPayload = {
@@ -100,18 +83,12 @@ export default function ProjectPage() {
       };
 
       const created = await createProject(body);
-      await load();
       return created;
     } catch (e) {
       console.error(e);
       const msg = e instanceof Error ? e.message : "Create project failed";
-      if (
-        String(msg).includes("already exists") ||
-        String(msg).includes("(409)")
-      ) {
-        alert(
-          "Trello Tag/Key ซ้ำในระบบครับ ❌\nลองเปลี่ยน Trello Tag ให้ไม่ซ้ำ แล้วสร้างใหม่"
-        );
+      if (String(msg).includes("already exists") || String(msg).includes("(409)")) {
+        alert("Trello Tag/Key ซ้ำในระบบครับ ❌\nลองเปลี่ยน Trello Tag ให้ไม่ซ้ำ แล้วสร้างใหม่");
       } else {
         alert(msg);
       }
@@ -121,10 +98,7 @@ export default function ProjectPage() {
     }
   };
 
-  const handleUpdate = async (
-    id: string,
-    payload: NewProjectPayload
-  ): Promise<ProjectApi> => {
+  const handleUpdate = async (id: string, payload: NewProjectPayload): Promise<ProjectApi> => {
     setSaving(true);
     try {
       const body: UpdateProjectPayload = {
@@ -136,7 +110,6 @@ export default function ProjectPage() {
       };
 
       const updated = await updateProject(id, body);
-      await load();
       return updated;
     } catch (e) {
       console.error(e);
@@ -163,6 +136,22 @@ export default function ProjectPage() {
     }
   };
 
+  // ✅ soft delete / restore handler
+  const handleToggleActive = async (p: ProjectListItem) => {
+    setSaving(true);
+    try {
+      // ✅ ส่ง current isActive เข้าไป เพื่อให้ backend toggle ได้แน่ ๆ
+      await toggleProjectActiveStatus(p.id, p.isActive);
+      await load();
+    } catch (e) {
+      console.error(e);
+      const msg = e instanceof Error ? e.message : "Update active status failed";
+      alert(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const yearOptions = useMemo(() => {
     const items = data?.items ?? [];
     const years = new Set<number>();
@@ -180,8 +169,19 @@ export default function ProjectPage() {
     const items = data?.items ?? [];
 
     return items.filter((p) => {
+      // ✅ NEW LOGIC:
+      // showArchived = true  => แสดงเฉพาะ archived (isActive === false)
+      // showArchived = false => แสดงเฉพาะ active (isActive !== false)
+      if (filters.showArchived) {
+        if (p.isActive !== false) return false;
+      } else {
+        if (p.isActive === false) return false;
+      }
+
+      // search
       if (!includesText(p, filters.query)) return false;
 
+      // date filters (ยังใช้เหมือนเดิม)
       const hasAnyDate = !!p.startDate || !!p.dueDate;
       if (!hasAnyDate) return filters.includeNoDate;
 
@@ -200,7 +200,6 @@ export default function ProjectPage() {
 
   return (
     <>
-      {/* ✅ Loading Overlay กลาง */}
       <PageLoadingOverlay
         show={loading || saving}
         label={saving ? "กำลังบันทึก..." : "กำลังโหลด..."}
@@ -225,11 +224,7 @@ export default function ProjectPage() {
           </button>
         </div>
 
-        <ProjectFilters
-          value={filters}
-          onChange={setFilters}
-          yearOptions={yearOptions}
-        />
+        <ProjectFilters value={filters} onChange={setFilters} yearOptions={yearOptions} />
 
         {!data ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
@@ -241,9 +236,9 @@ export default function ProjectPage() {
               <ProjectCard
                 key={project.id}
                 project={project}
-                // ✅ ปิด members ไปก่อน => จะไม่ยิง GET /members แล้วไม่แดง
                 members={[]}
                 onEdit={openEdit}
+                onToggleActive={handleToggleActive}
               />
             ))}
 

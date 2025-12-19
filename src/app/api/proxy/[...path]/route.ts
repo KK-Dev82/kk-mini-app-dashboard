@@ -25,6 +25,12 @@ function getProxyPath(req: NextRequest, paramsPath: unknown) {
 const FORCE_ENV_TOKEN = true;
 
 function pickToken(req: NextRequest) {
+  // ✅ ถ้า client ส่ง x-no-auth: 1 => ห้ามใส่ token
+  const noAuth = (req.headers.get("x-no-auth") ?? "").trim() === "1";
+  if (noAuth) {
+    return { token: "", source: "noauth" as const };
+  }
+
   const envToken = (process.env.API_TOKEN ?? "").trim();
 
   const headerAuth = req.headers.get("authorization") ?? "";
@@ -43,7 +49,13 @@ function pickToken(req: NextRequest) {
 
   return {
     token,
-    source: envToken ? ("env" as const) : headerToken ? ("header" as const) : cookieToken ? ("cookie" as const) : ("none" as const),
+    source: envToken
+      ? ("env" as const)
+      : headerToken
+      ? ("header" as const)
+      : cookieToken
+      ? ("cookie" as const)
+      : ("none" as const),
   };
 }
 
@@ -69,7 +81,7 @@ async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
   headers.set("ngrok-skip-browser-warning", "true");
   headers.set("accept", "application/json");
 
-  // ✅ เลือก token
+  // ✅ เลือก token (เคารพ x-no-auth)
   const { token, source } = pickToken(req);
 
   // กัน client ส่ง Authorization แปลก ๆ / กัน cookie มาทับ
@@ -100,8 +112,8 @@ async function handler(req: NextRequest, ctx: { params?: { path?: unknown } }) {
     status: upstream.status,
     headers: {
       "content-type": ct || "application/json",
-      "x-proxy-auth-source": source,          // env/header/cookie/none
-      "x-proxy-has-auth": token ? "1" : "0",  // 1/0
+      "x-proxy-auth-source": source,
+      "x-proxy-has-auth": token ? "1" : "0",
     },
   });
 }

@@ -90,7 +90,7 @@ export function projectStatusBadgeClass(status?: ProjectStatus | null): string {
  * ========================= */
 
 export async function fetchProjects(): Promise<ProjectsResponse> {
-  const projects = await apiGet<ProjectApi[]>("/projects");
+  const projects = await apiGet<any[]>("/projects");
 
   return {
     items: (projects ?? []).map((p) => ({
@@ -101,7 +101,8 @@ export async function fetchProjects(): Promise<ProjectsResponse> {
       status: p.status,
       startDate: p.startDate,
       dueDate: p.dueDate,
-      isActive: p.isActive,
+      // ✅ กัน schema: isActive หรือ active
+      isActive: (p.isActive ?? p.active ?? true) as boolean,
     })),
   };
 }
@@ -131,6 +132,48 @@ export async function updateProject(
 
   console.log("[projectService.updateProject payload]", { id, ...safe });
   return apiPut<ProjectApi>(`/projects/${encodeURIComponent(id)}`, safe);
+}
+
+/**
+ * ✅ Soft delete / restore
+ *
+ * ปัญหาที่เจอ: PUT /projects/{id}/status ตอบ 200 แต่ isActive ยัง true
+ * สาเหตุส่วนใหญ่คือ backend ต้องการให้ส่งค่า isActive มาให้ชัดเจน
+ *
+ * แนวทาง:
+ * 1) ถ้ามี currentIsActive -> ส่ง { isActive: !currentIsActive } ก่อน
+ * 2) ถ้า backend ไม่รับ body (บาง swagger ระบุไม่มี body) -> fallback ส่ง {}
+ */
+export async function toggleProjectActiveStatus(
+  id: string,
+  currentIsActive?: boolean
+): Promise<ProjectApi> {
+  const url = `/projects/${encodeURIComponent(id)}/status`;
+
+  // ถ้ารู้ค่าปัจจุบัน ให้ส่งค่าที่ต้องการไปเลย
+  const body =
+    typeof currentIsActive === "boolean"
+      ? { isActive: !currentIsActive, active: !currentIsActive }
+      : {};
+
+  try {
+    return await apiPut<ProjectApi>(url, body);
+  } catch (err: any) {
+    // fallback: ถ้า backend ไม่รับ body
+    const msg = String(err?.message ?? err ?? "");
+    const status = err?.status ?? err?.response?.status;
+    const shouldRetry =
+      typeof currentIsActive === "boolean" &&
+      (status === 400 ||
+        status === 415 ||
+        msg.includes("415") ||
+        msg.toLowerCase().includes("unsupported") ||
+        msg.toLowerCase().includes("bad request") ||
+        msg.toLowerCase().includes("invalid"));
+
+    if (!shouldRetry) throw err;
+    return apiPut<ProjectApi>(url, {});
+  }
 }
 
 /* =========================
@@ -259,7 +302,6 @@ export async function removeProjectMember(
   );
 }
 
-// ✅ PUT role ต้องใช้ token (proxy จะใส่ให้)
 export async function updateProjectMemberRole(
   projectId: string,
   userId: string,
