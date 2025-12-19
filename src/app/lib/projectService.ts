@@ -242,10 +242,7 @@ function normalizeProjectMember(raw: ProjectMemberRaw): ProjectMemberApi | null 
     undefined;
 
   const email: string | undefined =
-    raw.email ??
-    raw.user?.email ??
-    raw.profile?.email ??
-    undefined;
+    raw.email ?? raw.user?.email ?? raw.profile?.email ?? undefined;
 
   const trelloMemberId: string | null | undefined =
     raw.trelloMemberId ?? raw.user?.trelloMemberId ?? null;
@@ -265,10 +262,8 @@ function normalizeProjectMember(raw: ProjectMemberRaw): ProjectMemberApi | null 
 }
 
 export async function fetchProjectMembers(projectId: string): Promise<ProjectMemberApi[]> {
-  const res = await apiGet<any[]>(
-    `/projects/${encodeURIComponent(projectId)}/members`,
-    { noAuth: true }
-  );
+  // ✅ แก้: ห้าม noAuth เพราะ endpoint นี้บาง backend อนุญาต แต่เพื่อให้ consistent ให้แนบ token ผ่าน proxy
+  const res = await apiGet<any[]>(`/projects/${encodeURIComponent(projectId)}/members`);
 
   return (res ?? []).map(normalizeProjectMember).filter(Boolean) as ProjectMemberApi[];
 }
@@ -281,10 +276,10 @@ export async function addProjectMember(
     ? payload.role
     : "MEMBER";
 
+  // ✅ แก้: ต้องแนบ token ไม่งั้นโดน 401 (โดยเฉพาะบน env ที่ backend บังคับ auth)
   const created = await apiPost<any>(
     `/projects/${encodeURIComponent(projectId)}/members`,
-    { userId: payload.userId, role: safeRole },
-    { noAuth: true }
+    { userId: payload.userId, role: safeRole }
   );
 
   const norm = normalizeProjectMember(created);
@@ -296,9 +291,9 @@ export async function removeProjectMember(
   projectId: string,
   userId: string
 ): Promise<{ success?: boolean }> {
+  // ✅ แก้: DELETE ต้องแนบ token ไม่งั้น 401
   return apiDelete<{ success?: boolean }>(
-    `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
-    { noAuth: true }
+    `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`
   );
 }
 
