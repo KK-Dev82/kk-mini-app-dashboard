@@ -138,7 +138,7 @@ export default function LeaveHistoryPage() {
   const leaveCount = leaveItems.length;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="mx-auto w-full max-w-[1400px] px-4 py-6">
       <TopTabs active={view} leaveCount={leaveCount} onChange={changeView} />
 
       <div className="mt-4">
