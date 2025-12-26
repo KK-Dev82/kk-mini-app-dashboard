@@ -45,6 +45,5 @@ export type DailyAttendanceItem = {
 };
 
 export async function fetchTodaysAttendance(): Promise<DailyAttendanceItem[]> {
-  // ✅ endpoint นี้ no-auth → สั่ง proxy ไม่ต้องใส่ token
   return apiGet<DailyAttendanceItem[]>("/checkin/daily", { noAuth: true });
 }

@@ -1,5 +1,3 @@
-// ปรับ import ให้ตรงกับไฟล์ apiClient.ts ของโปรเจกต์คุณ
-// ถ้าใช้ชื่อ apiClient แทน apiGet ก็เปลี่ยนตรงนี้ตัวเดียว
 import { apiGet } from "./apiClient";
 
 export type TeamMember = {
@@ -12,7 +10,7 @@ export type UserProfile = {
   id: number;
   name: string;
   initials: string;
-  title: string;       // แถบสีฟ้าใต้ชื่อ (เช่น Project Manager)
+  title: string;
   email: string;
   department: string;
   role: string;

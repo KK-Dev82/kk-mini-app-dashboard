@@ -150,7 +150,6 @@ export async function toggleProjectActiveStatus(
 ): Promise<ProjectApi> {
   const url = `/projects/${encodeURIComponent(id)}/status`;
 
-  // ถ้ารู้ค่าปัจจุบัน ให้ส่งค่าที่ต้องการไปเลย
   const body =
     typeof currentIsActive === "boolean"
       ? { isActive: !currentIsActive, active: !currentIsActive }

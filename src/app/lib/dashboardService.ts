@@ -93,9 +93,7 @@ const MOCK_OVERVIEW: DashboardOverview = {
   },
 };
 
-/* ---------- Service function ---------- */
 
 export async function fetchDashboardOverview(): Promise<DashboardOverview> {
-  // ✅ mock: ไม่ยิง API ไม่ผ่าน proxy ไม่เจอ parse URL error
   return MOCK_OVERVIEW;
 }

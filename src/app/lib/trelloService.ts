@@ -59,7 +59,6 @@ export type TrelloList = {
   closed: boolean;
 };
 
-/** ✅ GET /trello/members */
 export type TrelloMember = {
   id: string;
   username: string;
@@ -72,21 +71,19 @@ export type TrelloMember = {
 
 export const fetchTrelloMembers = () => apiGet<TrelloMember[]>("/trello/members");
 
-/** ✅ GET /trello/cards/tag/{tag} */
 export async function fetchTrelloCardsByTag(tag: string): Promise<TrelloCard[]> {
   const t = (tag ?? "").trim();
   if (!t) return [];
   return apiGet<TrelloCard[]>(`/trello/cards/tag/${encodeURIComponent(t)}`);
 }
 
-/** ✅ POST /trello/cards */
 export type CreateTrelloCardPayload = {
   listId: string;
   name: string;
   desc?: string;
   memberIds?: string[];
-  startDate?: string; // ISO
-  dueDate?: string; // ISO
+  startDate?: string;
+  dueDate?: string;
   checklistItems?: string[];
   projectId?: string;
 };
@@ -97,13 +94,12 @@ export async function createTrelloCard(
   return apiPost<TrelloCard>("/trello/cards", payload);
 }
 
-/** ✅ PUT /trello/cards/{cardId} */
 export type UpdateTrelloCardPayload = {
   listId: string;
   name: string;
   desc?: string;
-  startDate?: string; // ISO
-  dueDate?: string; // ISO
+  startDate?: string;
+  dueDate?: string;
 };
 
 export async function updateTrelloCard(
@@ -115,31 +111,20 @@ export async function updateTrelloCard(
   return apiPut<TrelloCard>(`/trello/cards/${encodeURIComponent(id)}`, payload);
 }
 
-/** ✅ GET /trello/lists */
 export const fetchTrelloLists = () => apiGet<TrelloList[]>("/trello/lists");
 
 /* ----------------------------- Member Assign ----------------------------- */
-/**
- * ✅ POST /trello/cards/{cardId}/assign
- * (ตาม swagger ที่คุณส่งมา)
- */
+
 export async function assignTrelloMember(cardId: string, memberId: string) {
   const cid = (cardId ?? "").trim();
   const mid = (memberId ?? "").trim();
   if (!cid) throw new Error("Missing cardId");
   if (!mid) throw new Error("Missing memberId");
-
-  // ถ้า backend ของคุณไม่รับ body ให้เปลี่ยนเป็น:
-  // return apiPost<any>(`/trello/cards/${encodeURIComponent(cid)}/assign?memberId=${encodeURIComponent(mid)}`);
   return apiPost<any>(`/trello/cards/${encodeURIComponent(cid)}/assign`, {
     memberId: mid,
   });
 }
 
-/**
- * ✅ เผื่อมีเส้นลบสมาชิก (ตอนนี้ของคุณยัง 404)
- * POST /trello/cards/{cardId}/unassign
- */
 export async function unassignTrelloMember(cardId: string, memberId: string) {
   const cid = (cardId ?? "").trim();
   const mid = (memberId ?? "").trim();
@@ -152,10 +137,7 @@ export async function unassignTrelloMember(cardId: string, memberId: string) {
 }
 
 /* ----------------------------- Checklist Update ----------------------------- */
-/**
- * ✅ PUT /trello/cards/{cardId}/checklist/{checkItemId}
- * Update checklist item state (complete/incomplete)
- */
+
 export type ChecklistItemState = "complete" | "incomplete";
 
 export async function updateChecklistItemState(
@@ -176,10 +158,4 @@ export async function updateChecklistItemState(
     `/trello/cards/${encodeURIComponent(cid)}/checklist/${encodeURIComponent(iid)}`,
     { state }
   );
-
-  // ❗ ถ้า backend ของคุณไม่รับ body แล้วต้องรับ query ให้ใช้แบบนี้แทน:
-  // return apiPut<any>(
-  //   `/trello/cards/${encodeURIComponent(cid)}/checklist/${encodeURIComponent(iid)}?state=${encodeURIComponent(state)}`,
-  //   undefined as any
-  // );
 }
