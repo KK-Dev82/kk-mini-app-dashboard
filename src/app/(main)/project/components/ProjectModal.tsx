@@ -16,6 +16,13 @@ import {
 
 import { fetchUsers, type UserApi } from "../../../lib/userService";
 
+import {
+  fetchProjectPhases,
+  createProjectPhase,
+  type ProjectPhaseApi,
+  type CreateProjectPhasePayload,
+} from "../../../lib/ganttService";
+
 export type NewProjectPayload = {
   name: string;
   description: string;
@@ -45,8 +52,10 @@ function parseISOToDate(iso?: string | null) {
 
 function toISOFromDateNoShift(d?: Date | null) {
   if (!d) return null;
-  // ✅ ใช้ UTC 12:00:00 กัน timezone shift (ตามของเดิมคุณ)
-  const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0));
+  // ✅ ใช้ UTC 12:00:00 กัน timezone shift
+  const utc = new Date(
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0)
+  );
   return utc.toISOString();
 }
 
@@ -144,10 +153,47 @@ function ProjectModalInner({
   const [allUsers, setAllUsers] = useState<UserApi[]>([]);
   const [initialMembers, setInitialMembers] = useState<ProjectMemberApi[]>([]);
   // ✅ เก็บ null เพื่อ "ติ๊กออก" โดยไม่ลบ key (กัน UI หาย)
-  const [selected, setSelected] = useState<Record<string, ProjectMemberRole | null>>({});
+  const [selected, setSelected] = useState<Record<
+    string,
+    ProjectMemberRole | null
+  >>({});
   const [userQuery, setUserQuery] = useState("");
 
   const isEdit = !!initial?.id;
+
+  // =========================
+  // ✅ PHASE UI/STATE
+  // =========================
+  const [phasesLoading, setPhasesLoading] = useState(false);
+  const [phasesError, setPhasesError] = useState("");
+  const [phases, setPhases] = useState<ProjectPhaseApi[]>([]);
+
+  const [enableAddPhase, setEnableAddPhase] = useState(false);
+  const [phaseName, setPhaseName] = useState("");
+  const [phaseStartDate, setPhaseStartDate] = useState<Date | null>(null);
+  const [phaseDueDate, setPhaseDueDate] = useState<Date | null>(null);
+  const [phaseSaving, setPhaseSaving] = useState(false);
+  const [phaseSubmitError, setPhaseSubmitError] = useState("");
+
+  const resetPhaseForm = () => {
+    setPhaseName("");
+    setPhaseStartDate(null);
+    setPhaseDueDate(null);
+    setPhaseSubmitError("");
+  };
+
+  const refreshPhases = async (projectId: string) => {
+    setPhasesLoading(true);
+    setPhasesError("");
+    try {
+      const res = await fetchProjectPhases(projectId);
+      setPhases(res ?? []);
+    } catch (e) {
+      setPhasesError(e instanceof Error ? e.message : "โหลด phases ไม่สำเร็จ");
+    } finally {
+      setPhasesLoading(false);
+    }
+  };
 
   useEffect(() => {
     setForm(buildInitialForm(initial));
@@ -159,6 +205,14 @@ function ProjectModalInner({
     setInitialMembers([]);
     setSelected({});
     setUserQuery("");
+
+    // phases reset
+    setEnableAddPhase(false);
+    resetPhaseForm();
+    setPhases([]);
+    setPhasesError("");
+    setPhasesLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial]);
 
   // โหลด users (ทั้ง create/edit)
@@ -220,15 +274,47 @@ function ProjectModalInner({
     };
   }, [isEdit, initial?.id]);
 
+  // ✅ ถ้า edit: โหลด phases จาก ganttService
+  useEffect(() => {
+    if (!isEdit || !initial?.id) return;
+
+    let cancelled = false;
+    setPhasesLoading(true);
+    setPhasesError("");
+
+    fetchProjectPhases(initial.id)
+      .then((res) => {
+        if (cancelled) return;
+        setPhases(res ?? []);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setPhasesError(e instanceof Error ? e.message : "โหลด phases ไม่สำเร็จ");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setPhasesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, initial?.id]);
+
   const tagError = useMemo(() => {
     const v = normalizeTag(form.trelloTag);
     if (!v) return "กรุณากรอก Trello Tag";
-    if (!isValidEnglishTag(v)) return "กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)";
+    if (!isValidEnglishTag(v))
+      return "กรอกได้เฉพาะ A-Z, 0-9, _ , - (ห้ามเว้นวรรค/ภาษาไทย)";
     return "";
   }, [form.trelloTag]);
 
   const dateError = useMemo(() => {
-    if (form.startDate && form.dueDate && form.dueDate.getTime() < form.startDate.getTime()) {
+    if (
+      form.startDate &&
+      form.dueDate &&
+      form.dueDate.getTime() < form.startDate.getTime()
+    ) {
       return "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
     }
     return "";
@@ -238,7 +324,10 @@ function ProjectModalInner({
     const s = userQuery.trim().toLowerCase();
     if (!s) return allUsers;
     return allUsers.filter((u) => {
-      return (u.name ?? "").toLowerCase().includes(s) || (u.email ?? "").toLowerCase().includes(s);
+      return (
+        (u.name ?? "").toLowerCase().includes(s) ||
+        (u.email ?? "").toLowerCase().includes(s)
+      );
     });
   }, [allUsers, userQuery]);
 
@@ -290,8 +379,6 @@ function ProjectModalInner({
       ...toRemove.map((uid) => removeProjectMember(projectId, uid)),
       ...toUpdateRole.map((p) => updateProjectMemberRole(projectId, p.userId, p.role)),
     ]);
-
-    // ไม่จำเป็นต้อง set state ต่อแล้ว เพราะเราจะ reload หน้า
   };
 
   // ✅ add members ในโหมด create (เพิ่มอย่างเดียว)
@@ -306,6 +393,54 @@ function ProjectModalInner({
     await Promise.all(toAdd.map((p) => addProjectMember(projectId, p)));
   };
 
+  // ✅ สร้าง Phase (POST /projects/{projectId}/phases) จาก ganttService
+  const handleCreatePhase = async () => {
+    if (!initial?.id) return;
+
+    setPhaseSubmitError("");
+
+    const name = phaseName.trim();
+    if (!name) return setPhaseSubmitError("กรุณากรอกชื่อ Phase");
+    if (!phaseStartDate || !phaseDueDate)
+      return setPhaseSubmitError("กรุณาเลือก Start date และ Due date");
+    if (phaseDueDate.getTime() < phaseStartDate.getTime())
+      return setPhaseSubmitError("Due date ต้องไม่ก่อน Start date");
+
+    // ✅ สำคัญ: orderIndex ต้องเป็น integer (แก้ 400)
+    const nextOrderIndex =
+      phases.length === 0
+        ? 0
+        : Math.max(...phases.map((p) => p.orderIndex ?? -1)) + 1;
+
+    const payload: CreateProjectPhasePayload = {
+      name,
+      description: null,
+      orderIndex: nextOrderIndex, // ✅ required
+      status: "NOT_STARTED",
+      startDate: toISOFromDateNoShift(phaseStartDate),
+      dueDate: toISOFromDateNoShift(phaseDueDate),
+    };
+
+    setPhaseSaving(true);
+    try {
+      const created = await createProjectPhase(initial.id, payload);
+
+      // ✅ แทรกเข้าลิสต์ แล้ว sort ตาม orderIndex
+      setPhases((prev) =>
+        [...prev, created].sort(
+          (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
+        )
+      );
+
+      resetPhaseForm();
+      setEnableAddPhase(false);
+    } catch (e) {
+      setPhaseSubmitError(e instanceof Error ? e.message : "สร้าง Phase ไม่สำเร็จ");
+    } finally {
+      setPhaseSaving(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitError("");
@@ -315,7 +450,8 @@ function ProjectModalInner({
 
     if (!isEdit) {
       if (!normTag) return setSubmitError("กรุณากรอก Trello Tag");
-      if (!isValidEnglishTag(normTag)) return setSubmitError("Trello Tag ต้องเป็นภาษาอังกฤษเท่านั้น");
+      if (!isValidEnglishTag(normTag))
+        return setSubmitError("Trello Tag ต้องเป็นภาษาอังกฤษเท่านั้น");
     }
     if (dateError) return setSubmitError(dateError);
 
@@ -335,16 +471,15 @@ function ProjectModalInner({
         await onUpdate?.(initial.id, payload);
         await applyMembersDiff(initial.id);
 
-        // ✅ ปิด modal ก่อน แล้วค่อย reload
         onClose();
-        window.location.reload(); // ✅ รีหน้า 1 ครั้งให้ทุกอย่าง fetch ใหม่
+        window.location.reload();
       } else {
         const created = await onCreate?.(payload);
         if (!created?.id) throw new Error("Create success but missing project id");
         await applyMembersForCreate(created.id);
 
         onClose();
-        window.location.reload(); // ✅ รีหน้า 1 ครั้งให้ทุกอย่าง fetch ใหม่
+        window.location.reload();
       }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Submit failed");
@@ -356,6 +491,10 @@ function ProjectModalInner({
   const inputClass =
     "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white outline-none " +
     "focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
+
+  const phasesSorted = useMemo(() => {
+    return [...phases].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  }, [phases]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
@@ -440,7 +579,9 @@ function ProjectModalInner({
               <select
                 className={inputClass}
                 value={form.status}
-                onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as ProjectStatus }))}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, status: e.target.value as ProjectStatus }))
+                }
                 disabled={submitting}
               >
                 {STATUS_OPTIONS.map((o) => (
@@ -476,6 +617,151 @@ function ProjectModalInner({
             </div>
           </div>
 
+          {/* =========================
+              ✅ PHASE UI (ตามรูปที่ต้องการ)
+              เฉพาะตอน Edit เท่านั้น
+             ========================= */}
+          {isEdit && initial?.id && (
+            <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">การเพิ่ม Phase</div>
+                  <div className="text-[11px] text-slate-500">
+                    เปิดใช้งานเพื่อเพิ่ม Phase (ชื่อ + Start date + Due date)
+                  </div>
+                </div>
+
+                {/* toggle */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEnableAddPhase((v) => !v);
+                    setPhaseSubmitError("");
+                  }}
+                  className={[
+                    "relative inline-flex h-7 w-12 items-center rounded-full transition",
+                    enableAddPhase ? "bg-blue-600" : "bg-slate-300",
+                  ].join(" ")}
+                  aria-label="toggle add phase"
+                  disabled={submitting}
+                >
+                  <span
+                    className={[
+                      "inline-block h-6 w-6 transform rounded-full bg-white transition",
+                      enableAddPhase ? "translate-x-5" : "translate-x-1",
+                    ].join(" ")}
+                  />
+                </button>
+              </div>
+
+              {enableAddPhase && (
+                <div className="space-y-3">
+                  <input
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                    placeholder="ชื่อ Phase"
+                    value={phaseName}
+                    onChange={(e) => setPhaseName(e.target.value)}
+                    disabled={phaseSaving || submitting}
+                  />
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-700">Start date</label>
+                      <AppDatePicker
+                        value={phaseStartDate}
+                        onChange={(d) => setPhaseStartDate(d)}
+                        placeholder="วัน/เดือน/ปี"
+                        disabled={phaseSaving || submitting}
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-700">Due date</label>
+                      <AppDatePicker
+                        value={phaseDueDate}
+                        onChange={(d) => setPhaseDueDate(d)}
+                        placeholder="วัน/เดือน/ปี"
+                        minDate={phaseStartDate ?? undefined}
+                        disabled={phaseSaving || submitting}
+                      />
+                    </div>
+                  </div>
+
+                  {phaseSubmitError ? (
+                    <div className="text-[11px] font-medium text-red-600">{phaseSubmitError}</div>
+                  ) : null}
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCreatePhase}
+                      disabled={phaseSaving || submitting}
+                      className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      {phaseSaving ? "กำลังเพิ่ม..." : "+ เพิ่ม Phase"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetPhaseForm();
+                        setEnableAddPhase(false);
+                      }}
+                      disabled={phaseSaving || submitting}
+                      className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      ยกเลิก
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => refreshPhases(initial.id)}
+                      disabled={phaseSaving || submitting || phasesLoading}
+                      className="ml-auto rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                      title="refresh phases"
+                    >
+                      รีเฟรช
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* list phases */}
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                <div className="px-4 py-2 text-xs font-semibold text-slate-700 border-b border-slate-100 flex items-center justify-between">
+                  <span>Phases</span>
+                  {phasesLoading ? <span className="text-slate-500">กำลังโหลด…</span> : null}
+                </div>
+
+                {phasesError ? (
+                  <div className="p-4 text-sm text-red-700">{phasesError}</div>
+                ) : phasesLoading ? (
+                  <div className="p-4 text-sm text-slate-500">กำลังโหลด…</div>
+                ) : phasesSorted.length === 0 ? (
+                  <div className="p-4 text-sm text-slate-500">ยังไม่มี Phase</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {phasesSorted.map((p) => (
+                      <div key={p.id} className="px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-semibold text-slate-900">{p.name}</div>
+                          <div className="text-[11px] text-slate-400">
+                            order: {p.orderIndex ?? 0}
+                          </div>
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {p.startDate ? new Date(p.startDate).toLocaleDateString("th-TH") : "-"} –{" "}
+                          {p.dueDate ? new Date(p.dueDate).toLocaleDateString("th-TH") : "-"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* MEMBERS */}
           <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -566,9 +852,7 @@ function ProjectModalInner({
               </div>
             </div>
 
-            <div className="text-[11px] text-slate-400">
-              * ลบสมาชิก = เอาติ๊กออก (ตอนกดบันทึกจะ sync ให้)
-            </div>
+            <div className="text-[11px] text-slate-400">* ลบสมาชิก = เอาติ๊กออก (ตอนกดบันทึกจะ sync ให้)</div>
           </div>
 
           {submitError ? (

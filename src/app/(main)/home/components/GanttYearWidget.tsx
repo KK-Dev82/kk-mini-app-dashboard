@@ -11,6 +11,14 @@ import {
 
 import { fetchProjects, type ProjectListItem } from "../../../lib/projectService";
 
+// ✅ เพิ่ม: phases api
+import {
+  fetchProjectPhases,
+  type ProjectPhaseApi,
+  type GanttTaskApi,
+  type GanttTaskColor,
+} from "../../../lib/ganttService";
+
 import type { GanttProjectWithTasks } from "../../component/ganttchart/ganttTypes";
 import ProjectGanttModal from "./ProjectGanttModal";
 
@@ -92,10 +100,37 @@ function isoToYMD(iso?: string | null): string | null {
   return `${y}-${m}-${day}`;
 }
 
+// สี phase -> task
+const PHASE_COLORS: GanttTaskColor[] = [
+  "blue",
+  "green",
+  "orange",
+  "purple",
+  "pink",
+  "red",
+  "slate",
+];
+
+function phaseToTask(phase: ProjectPhaseApi): GanttTaskApi | null {
+  const start = isoToYMD(phase.startDate);
+  const end = isoToYMD(phase.dueDate);
+  if (!start || !end) return null;
+
+  const idx =
+    typeof phase.orderIndex === "number" ? phase.orderIndex : 0;
+
+  return {
+    id: phase.id,
+    title: phase.name,
+    startDate: start,
+    endDate: end,
+    color: PHASE_COLORS[Math.abs(idx) % PHASE_COLORS.length],
+  };
+}
+
 type ProjectRow = GanttProjectWithTasks & {
   bar: ProjectBar | null;
   color: ProjectColor;
-  // สำหรับ label เล็ก ๆ ใต้ชื่อ (optional)
   rawStartISO: string | null;
   rawDueISO: string | null;
 };
@@ -105,12 +140,20 @@ export default function GanttYearWidget() {
   const [loading, setLoading] = useState(false);
   const [year, setYear] = useState(() => new Date().getFullYear());
 
-  // เก็บ list จาก /projects
+  // list จาก /projects
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
+
+  // selected project for modal
   const [selected, setSelected] = useState<GanttProjectWithTasks | null>(null);
 
-  // ป้องกัน race
+  // ✅ loading สำหรับ phases (modal)
+  const [phaseLoading, setPhaseLoading] = useState(false);
+
+  // ป้องกัน race (list)
   const reqSeqRef = useRef(0);
+
+  // ✅ ป้องกัน race (phases)
+  const phaseReqSeqRef = useRef(0);
 
   const refetch = async (opts?: { silent?: boolean }) => {
     if (!open) return;
@@ -122,9 +165,7 @@ export default function GanttYearWidget() {
       const res = await fetchProjects(); // ✅ GET /projects
       if (seq !== reqSeqRef.current) return;
 
-      // ✅ เอาเฉพาะ active ก็ได้ (ถ้าอยากให้ archived ไม่ขึ้น)
       const items = (res?.items ?? []).filter((p) => p.isActive !== false);
-
       setProjects(items);
     } finally {
       if (!opts?.silent && seq === reqSeqRef.current) setLoading(false);
@@ -148,7 +189,7 @@ export default function GanttYearWidget() {
     };
   }, [open]);
 
-  // (optional) auto refresh
+  // auto refresh
   useEffect(() => {
     if (!open) return;
 
@@ -192,16 +233,16 @@ export default function GanttYearWidget() {
       const endYMD = isoToYMD(p.dueDate);
 
       // ถ้าไม่มีวันเลย -> ไม่มี bar
-      const bar = startYMD && endYMD ? mapRangeToProjectBar(startYMD, endYMD, year) : null;
+      const bar =
+        startYMD && endYMD ? mapRangeToProjectBar(startYMD, endYMD, year) : null;
 
       return {
         id: p.id,
-        // ✅ tag บน pill: เอา trelloTag หรือ status ก็ได้
         tag: (p.key || "Project").toUpperCase(),
         projectName: p.name,
         projectStartDate: startYMD ?? "",
         projectEndDate: endYMD ?? "",
-        tasks: [], // ✅ หน้านี้ยังไม่ดึง sub tasks
+        tasks: [], // ✅ จะเติมตอนคลิกแท่ง โดยใช้ /projects/{id}/phases
         bar,
         color: getProjectColor(p.id),
         rawStartISO: p.startDate ?? null,
@@ -209,6 +250,32 @@ export default function GanttYearWidget() {
       };
     });
   }, [projects, year]);
+
+  // ✅ โหลด phases แล้วใส่เข้า selected.tasks
+  const openProjectAndLoadPhases = async (row: ProjectRow) => {
+    // เปิด modal ทันที (tasks ยังว่างก่อน)
+    setSelected(row);
+
+    const seq = ++phaseReqSeqRef.current;
+    setPhaseLoading(true);
+
+    try {
+      const phases = await fetchProjectPhases(row.id); // ✅ GET /projects/{projectId}/phases
+      if (seq !== phaseReqSeqRef.current) return;
+
+      const tasks: GanttTaskApi[] = (phases ?? [])
+        .map((ph) => phaseToTask(ph))
+        .filter((t): t is GanttTaskApi => Boolean(t));
+
+      // อัปเดตเฉพาะถ้ายังเลือกโปรเจกต์เดิมอยู่
+      setSelected((prev) => {
+        if (!prev || prev.id !== row.id) return prev;
+        return { ...prev, tasks };
+      });
+    } finally {
+      if (seq === phaseReqSeqRef.current) setPhaseLoading(false);
+    }
+  };
 
   return (
     <>
@@ -239,7 +306,9 @@ export default function GanttYearWidget() {
                   <CalendarDaysIcon className="h-5 w-5 text-slate-600" />
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">Gantt Chart</div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Gantt Chart
+                  </div>
                   <div className="text-xs text-slate-500">ม.ค. – ธ.ค. (รายปี)</div>
                 </div>
               </div>
@@ -259,7 +328,9 @@ export default function GanttYearWidget() {
                 </button>
 
                 <div className="flex min-w-[220px] items-center justify-center gap-3 text-center">
-                  <div className="text-sm font-semibold text-slate-900">ปี {year + 543}</div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    ปี {year + 543}
+                  </div>
 
                   {loading && (
                     <div className="rounded-xl bg-slate-900 px-2 py-1">
@@ -315,7 +386,8 @@ export default function GanttYearWidget() {
                             startM: row.bar.startM,
                             endM: row.bar.endM,
                             className: `bg-gradient-to-r ${row.color.bar} focus:outline-none focus:ring-1 ${row.color.ring}`,
-                            onClick: () => setSelected(row),
+                            // ✅ เปลี่ยนจาก setSelected(row) -> โหลด phases แล้วค่อยเติม tasks
+                            onClick: () => openProjectAndLoadPhases(row),
                             lane: 0,
                           },
                         ]
@@ -344,7 +416,6 @@ export default function GanttYearWidget() {
                                 </div>
 
                                 <div className="mt-1 text-xs text-slate-500">
-                                  {/* ✅ ถ้าไม่มีวัน ให้แสดงข้อความแทน */}
                                   {row.projectStartDate && row.projectEndDate
                                     ? `${fmtThaiDate(row.projectStartDate)} – ${fmtThaiDate(
                                         row.projectEndDate
@@ -355,7 +426,12 @@ export default function GanttYearWidget() {
                             </div>
                           }
                           right={
-                            <GanttTimeline bars={bars} laneHeight={52} barHeight={40} height={52} />
+                            <GanttTimeline
+                              bars={bars}
+                              laneHeight={52}
+                              barHeight={40}
+                              height={52}
+                            />
                           }
                           leftWidth={360}
                         />
@@ -396,6 +472,11 @@ export default function GanttYearWidget() {
             project={selected}
             year={year}
           />
+
+          {Boolean(selected) && phaseLoading && (
+            <div className="fixed inset-0 z-[61] pointer-events-none">
+            </div>
+          )}
         </div>
       )}
     </>
