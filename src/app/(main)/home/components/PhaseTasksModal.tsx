@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeftIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 
 import {
   fetchProjectPhaseById,
@@ -35,10 +35,13 @@ const COLOR_MAP: Record<GanttTaskColor, string> = {
   pink: "bg-pink-500",
 };
 
-// ✅ ปรับเฉพาะหน้า PhaseTasksModal ให้ชิดซ้ายขึ้น
 const TASK_LEFT_WIDTH = 240;
+const SPRINT_DAYS = 14;
 
-// ---------- date helpers (day-scale, local only) ----------
+// ✅ ปรับ offset เพื่อให้ “ตัวเลข” ตรงกับเส้นมากขึ้น (ชดเชยกล่อง label)
+const LABEL_SHIFT_PX = 6;
+
+// ---------- date helpers ----------
 function isoToYMD(iso?: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
@@ -54,7 +57,6 @@ function clampNum(n: number, min: number, max: number) {
 }
 
 function diffDays(a: Date, b: Date) {
-  // a - b in days (date-only)
   const ms = 24 * 60 * 60 * 1000;
   const da = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
   const db = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime();
@@ -82,79 +84,130 @@ function phaseTaskToGanttTask(t: PhaseTaskApi): GanttTaskApi | null {
   };
 }
 
-// ---------- day timeline UI (local) ----------
+// ---------- sprint timeline UI ----------
 type DayBar = {
   id: string;
   title: string;
-  startDay: number; // 0..totalDays-1
-  endDay: number; // 0..totalDays-1
+  startDay: number; // 0..sprintDays-1
+  endDay: number; // 0..sprintDays-1
   className: string;
 };
 
-function DayHeader({
+/**
+ * ✅ Sprint Header แบบ “ไม้บรรทัด” (สวยขึ้น)
+ * - baseline เนียนขึ้น
+ * - ขีดเล็กทุกวัน + ขีดกลางทุก 2 วัน
+ * - ขีดใหญ่วัน 1 / 7 / วันสุดท้าย
+ * - เลขอยู่ “บนหัวขีดใหญ่” + ชดเชยซ้ายเล็กน้อยให้ตรงเส้น
+ */
+function SprintHeader({
   leftLabel,
   leftWidth,
-  phaseStart,
-  totalDays,
+  sprintDays,
 }: {
   leftLabel: string;
   leftWidth: number;
-  phaseStart: Date;
-  totalDays: number;
+  sprintDays: number;
 }) {
-  // ✅ แสดง tick ทุก 7 วัน (1,8,15,...) เป็น “เลขวัน” เท่านั้น (ไม่เอาเดือน/ปี)
-  const ticks = useMemo(() => {
-    if (totalDays <= 0) return [];
-    const step = 7;
+  const denom = Math.max(1, sprintDays - 1);
 
-    const arr: { day: number; label: string }[] = [];
-    for (let d = 0; d < totalDays; d += step) {
-      const date = addDays(phaseStart, d);
-      arr.push({ day: d, label: String(date.getDate()) }); // ✅ แค่เลขวัน
+  const { dayIndexes, majorSet } = useMemo(() => {
+    const dayIndexes = Array.from(
+      { length: Math.max(0, sprintDays) },
+      (_, i) => i
+    );
+
+    const majorSet = new Set<number>();
+    if (sprintDays > 0) {
+      majorSet.add(0); // day 1
+      if (sprintDays >= 7) majorSet.add(6); // day 7 (index 6)
+      majorSet.add(sprintDays - 1); // last day
     }
 
-    // ใส่ปลายทางด้วยถ้ายังไม่มี
-    if (totalDays > 1) {
-      const last = totalDays - 1;
-      const lastDate = addDays(phaseStart, last);
-      const lastLabel = String(lastDate.getDate()); // ✅ แค่เลขวัน
-      const hasLast = arr.some((x) => x.day === last);
-      if (!hasLast) arr.push({ day: last, label: lastLabel });
-    }
+    return { dayIndexes, majorSet };
+  }, [sprintDays]);
 
-    return arr;
-  }, [phaseStart, totalDays]);
+  const labels = useMemo(() => {
+    const items: { dayIndex: number; text: string }[] = [];
+    if (sprintDays >= 1) items.push({ dayIndex: 0, text: "1" });
+    if (sprintDays >= 7) items.push({ dayIndex: 6, text: "7" });
+    if (sprintDays >= 2)
+      items.push({ dayIndex: sprintDays - 1, text: String(sprintDays) });
+
+    const m = new Map<number, string>();
+    items.forEach((x) => m.set(x.dayIndex, x.text));
+    return Array.from(m.entries())
+      .map(([dayIndex, text]) => ({ dayIndex, text }))
+      .sort((a, b) => a.dayIndex - b.dayIndex);
+  }, [sprintDays]);
 
   return (
     <GanttRowLayout
-      left={<div className="text-xs font-semibold text-slate-500">{leftLabel}</div>}
+      left={
+        <div className="text-xs font-semibold text-slate-500">{leftLabel}</div>
+      }
       right={
-        <div className="relative h-7">
-          {/* เส้นแบ่ง (ทุก 7 วัน) */}
+        <div className="relative h-11">
+          {/* baseline */}
+          <div className="absolute left-0 right-0 bottom-[14px] border-t border-slate-200/80" />
+
+          {/* ticks */}
           <div className="absolute inset-0">
-            {ticks.map((t) => {
-              const leftPct = totalDays <= 1 ? 0 : (t.day / totalDays) * 100;
+            {dayIndexes.map((dayIndex) => {
+              const leftPct = (dayIndex / denom) * 100;
+              const isMajor = majorSet.has(dayIndex);
+
+              // minor/medium/major like a real ruler
+              const isMedium = !isMajor && dayIndex % 2 === 0;
+              const tickH = isMajor ? 22 : isMedium ? 14 : 9;
+              const tickW = isMajor ? 2 : 1;
+
+              const tickCls = isMajor
+                ? "bg-slate-700/90"
+                : isMedium
+                ? "bg-slate-400/90"
+                : "bg-slate-300/90";
+
               return (
                 <div
-                  key={`line-${t.day}`}
-                  className="absolute top-0 bottom-0 border-l border-slate-200/70"
-                  style={{ left: `${leftPct}%` }}
-                />
+                  key={`tick-${dayIndex}`}
+                  className="absolute bottom-[14px]"
+                  style={{
+                    left: `${leftPct}%`,
+                    transform: "translateX(-50%)",
+                  }}
+                >
+                  <div
+                    className={`rounded-full ${tickCls}`}
+                    style={{ width: `${tickW}px`, height: `${tickH}px` }}
+                  />
+                  {isMajor && (
+                    <div className="mx-auto mt-[3px] h-[2px] w-[10px] rounded-full bg-slate-200/80" />
+                  )}
+                </div>
               );
             })}
           </div>
 
-          {/* label (เลขวัน) */}
+          {/* labels */}
           <div className="absolute inset-0">
-            {ticks.map((t) => {
-              const leftPct = totalDays <= 1 ? 0 : (t.day / totalDays) * 100;
+            {labels.map((l) => {
+              const leftPct = (l.dayIndex / denom) * 100;
+
               return (
                 <div
-                  key={`label-${t.day}`}
-                  className="absolute -top-0.5 text-[11px] font-semibold text-slate-500"
-                  style={{ left: `${leftPct}%`, transform: "translateX(-10%)" }}
+                  key={`label-${l.dayIndex}`}
+                  className="absolute pointer-events-none"
+                  style={{
+                    left: `${leftPct}%`,
+                    // ✅ ชดเชยไปทางซ้ายอีกนิดให้เลข “ตรงเส้น” (ปรับ LABEL_SHIFT_PX ได้)
+                    transform: `translateX(calc(-50% - ${LABEL_SHIFT_PX}px))`,
+                    bottom: "38px",
+                  }}
                 >
-                  {t.label}
+                  <div className="rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 shadow-[0_1px_0_rgba(0,0,0,0.04)] leading-none whitespace-nowrap">
+                    {l.text}
+                  </div>
                 </div>
               );
             })}
@@ -166,65 +219,38 @@ function DayHeader({
   );
 }
 
-function DayTimeline({
+function SprintTimeline({
   bars,
-  totalDays,
+  sprintDays,
   height = 52,
   barHeight = 40,
-  showWeekSeparators = true,
 }: {
   bars: DayBar[];
-  totalDays: number;
+  sprintDays: number;
   height?: number;
   barHeight?: number;
-  showWeekSeparators?: boolean;
 }) {
-  const ticks = useMemo(() => {
-    if (!showWeekSeparators || totalDays <= 0) return [];
-    const step = 7;
-    const arr: number[] = [];
-    for (let d = 0; d < totalDays; d += step) arr.push(d);
-    return arr;
-  }, [showWeekSeparators, totalDays]);
-
   return (
     <div className="relative w-full" style={{ height }}>
-      {/* week separators */}
-      {showWeekSeparators && (
-        <div className="absolute inset-0">
-          {ticks.map((d) => {
-            const leftPct = totalDays <= 1 ? 0 : (d / totalDays) * 100;
-            return (
-              <div
-                key={d}
-                className="absolute top-0 bottom-0 border-l border-slate-200/70"
-                style={{ left: `${leftPct}%` }}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {/* bars */}
       <div className="absolute inset-0">
         {bars.map((b) => {
-          const start = clampNum(b.startDay, 0, Math.max(0, totalDays - 1));
-          const end = clampNum(b.endDay, 0, Math.max(0, totalDays - 1));
+          const start = clampNum(b.startDay, 0, Math.max(0, sprintDays - 1));
+          const end = clampNum(b.endDay, 0, Math.max(0, sprintDays - 1));
           const safeEnd = Math.max(start, end);
 
-          const leftPct = totalDays <= 1 ? 0 : (start / totalDays) * 100;
+          const leftPct = sprintDays <= 1 ? 0 : (start / sprintDays) * 100;
           const widthPct =
-            totalDays <= 1 ? 100 : ((safeEnd - start + 1) / totalDays) * 100;
+            sprintDays <= 1 ? 100 : ((safeEnd - start + 1) / sprintDays) * 100;
 
           const top = (height - barHeight) / 2;
-
-          const shared =
-            "absolute rounded-lg px-4 flex items-center text-[11px] font-medium text-white shadow-sm hover:brightness-110 transition-all";
 
           return (
             <div
               key={b.id}
-              className={[shared, b.className].join(" ")}
+              className={[
+                "absolute rounded-lg px-4 flex items-center text-[11px] font-medium text-white shadow-sm hover:brightness-110 transition-all",
+                b.className,
+              ].join(" ")}
               style={{
                 top,
                 left: `${leftPct}%`,
@@ -247,21 +273,20 @@ function DayTimeline({
 export default function PhaseTasksModal({
   open,
   onBack,
-  onCloseAll,
+  onCloseAll, // ไม่โชว์ปุ่ม X ในหน้านี้
   projectId,
   phaseId,
   phaseTitle,
-  year, // (ยังรับไว้ได้ แต่หน้านี้ไม่ใช้แล้ว)
+  year, // ไม่ใช้
 }: {
-  open: boolean; // true = สไลด์เข้ามา, false = สไลด์ออก
-  onBack: () => void; // ✅ ลูกศรกลับไปหน้า Phases
-  onCloseAll?: () => void; // (optional) ปิดทั้ง modal ใหญ่
+  open: boolean;
+  onBack: () => void;
+  onCloseAll?: () => void;
   projectId: string;
   phaseId: string;
   phaseTitle: string;
   year: number;
 }) {
-  // ---------- slide lifecycle ----------
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
 
@@ -276,7 +301,6 @@ export default function PhaseTasksModal({
     }
   }, [open]);
 
-  // ---------- data ----------
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<ProjectPhaseDetailApi | null>(null);
   const reqRef = useRef(0);
@@ -298,7 +322,6 @@ export default function PhaseTasksModal({
       });
   }, [open, projectId, phaseId]);
 
-  // ✅ phase range -> day scale
   const phaseRange = useMemo(() => {
     const sYMD = isoToYMD(phase?.startDate ?? null);
     const eYMD = isoToYMD(phase?.dueDate ?? null);
@@ -308,15 +331,53 @@ export default function PhaseTasksModal({
     const e = toDateOnly(eYMD);
     if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
 
-    const totalDays = diffDays(e, s) + 1; // inclusive
+    const totalDays = diffDays(e, s) + 1;
     if (totalDays <= 0) return null;
 
     return { start: s, end: e, totalDays, startYMD: sYMD, endYMD: eYMD };
   }, [phase]);
 
-  // ✅ map tasks -> day offsets (clamp inside phase)
+  const sprintCount = useMemo(() => {
+    if (!phaseRange) return 0;
+    return Math.max(1, Math.ceil(phaseRange.totalDays / SPRINT_DAYS));
+  }, [phaseRange]);
+
+  const [sprintIndex, setSprintIndex] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    setSprintIndex(0);
+  }, [open, phaseId]);
+
+  useEffect(() => {
+    if (sprintCount <= 0) return;
+    setSprintIndex((i) => clampNum(i, 0, sprintCount - 1));
+  }, [sprintCount]);
+
+  const sprintRange = useMemo(() => {
+    if (!phaseRange) return null;
+
+    const startDay = sprintIndex * SPRINT_DAYS;
+    const endDay = Math.min(phaseRange.totalDays - 1, startDay + SPRINT_DAYS - 1);
+
+    const startDate = addDays(phaseRange.start, startDay);
+    const endDate = addDays(phaseRange.start, endDay);
+
+    const sprintDays = endDay - startDay + 1;
+
+    return {
+      sprintIndex,
+      sprintCount,
+      startDay,
+      endDay,
+      sprintDays,
+      startYMD: isoToYMD(startDate.toISOString())!,
+      endYMD: isoToYMD(endDate.toISOString())!,
+    };
+  }, [phaseRange, sprintIndex, sprintCount]);
+
   const taskRows = useMemo(() => {
-    if (!phase?.tasks || !phaseRange) return [];
+    if (!phase?.tasks || !phaseRange || !sprintRange) return [];
 
     return phase.tasks
       .map((t) => phaseTaskToGanttTask(t))
@@ -325,28 +386,44 @@ export default function PhaseTasksModal({
         const s = toDateOnly(t.startDate);
         const e = toDateOnly(t.endDate);
 
-        const startDay = clampNum(
+        const taskStart = clampNum(
           diffDays(s, phaseRange.start),
           0,
           phaseRange.totalDays - 1
         );
-        const endDay = clampNum(
+        const taskEnd = clampNum(
           diffDays(e, phaseRange.start),
           0,
           phaseRange.totalDays - 1
         );
 
+        const ovStart = Math.max(taskStart, sprintRange.startDay);
+        const ovEnd = Math.min(taskEnd, sprintRange.endDay);
+        if (ovEnd < ovStart) return null;
+
+        const idx = phase.tasks.findIndex((pt) => pt.id === t.id);
+        const color = TASK_COLORS[Math.abs(idx) % TASK_COLORS.length];
+
         return {
+          key: `${t.id}-s${sprintRange.sprintIndex}`,
           id: t.id,
           title: t.title,
           startDate: t.startDate,
           endDate: t.endDate,
-          startDay,
-          endDay,
-          colorClass: COLOR_MAP[t.color],
+          startDay: ovStart - sprintRange.startDay,
+          endDay: ovEnd - sprintRange.startDay,
+          cutLeft: taskStart < sprintRange.startDay,
+          cutRight: taskEnd > sprintRange.endDay,
+          colorClass: COLOR_MAP[color],
         };
-      });
-  }, [phase, phaseRange]);
+      })
+      .filter((x): x is NonNullable<typeof x> => Boolean(x));
+  }, [phase, phaseRange, sprintRange]);
+
+  const canPrev = sprintRange ? sprintRange.sprintIndex > 0 : false;
+  const canNext = sprintRange
+    ? sprintRange.sprintIndex < sprintRange.sprintCount - 1
+    : false;
 
   if (!mounted) return null;
 
@@ -359,7 +436,7 @@ export default function PhaseTasksModal({
       ].join(" ")}
       aria-hidden={!open}
     >
-      <div className="h-full overflow-hidden">
+      <div className="h-full overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -377,46 +454,43 @@ export default function PhaseTasksModal({
                 Tasks in: {phaseTitle}
               </div>
 
-              {phaseRange && (
+              {phaseRange && sprintRange && (
                 <div className="mt-1 text-xs text-slate-500">
                   ช่วง Phase: {fmtThaiDate(phaseRange.startYMD)} –{" "}
-                  {fmtThaiDate(phaseRange.endYMD)}{" "}
-                  <span className="ml-1 text-slate-400">
+                  {fmtThaiDate(phaseRange.endYMD)}
+                  <span className="ml-2 text-slate-400">
                     ({phaseRange.totalDays} วัน)
                   </span>
+
+                  <div className="mt-1 text-slate-600">
+                    <span className="font-semibold">
+                      Sprint {sprintRange.sprintIndex + 1}/{sprintRange.sprintCount}
+                    </span>
+                    <span className="mx-2 text-slate-300">•</span>
+                    <span>
+                      {fmtThaiDate(sprintRange.startYMD)} –{" "}
+                      {fmtThaiDate(sprintRange.endYMD)}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>
           </div>
 
-          {onCloseAll ? (
-            <button
-              type="button"
-              onClick={onCloseAll}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white hover:bg-slate-50"
-              aria-label="Close"
-            >
-              <XMarkIcon className="h-5 w-5 text-slate-700" />
-            </button>
-          ) : (
-            <div className="h-10 w-10" />
-          )}
+          {/* ไม่แสดง X ซ้ำ */}
+          <div className="h-10 w-10" />
         </div>
 
         {/* Body */}
-        <div className="h-[calc(100%-64px)] overflow-auto">
+        <div className="flex-1 overflow-auto">
           <div className="px-6 py-5">
-            <div className="mb-3 text-sm font-semibold text-slate-900">
-              Tasks
-            </div>
+            <div className="mb-3 text-sm font-semibold text-slate-900">Tasks</div>
 
-            {/* ✅ Day header (อิงช่วง Phase) + แสดง “เลขวัน” เท่านั้น */}
-            {phaseRange ? (
-              <DayHeader
+            {phaseRange && sprintRange ? (
+              <SprintHeader
                 leftLabel="Task"
                 leftWidth={TASK_LEFT_WIDTH}
-                phaseStart={phaseRange.start}
-                totalDays={phaseRange.totalDays}
+                sprintDays={sprintRange.sprintDays}
               />
             ) : (
               <div className="text-xs text-slate-500">ยังไม่กำหนดช่วง Phase</div>
@@ -430,24 +504,25 @@ export default function PhaseTasksModal({
                   <div className="text-sm font-semibold text-slate-700">
                     กำลังโหลด tasks
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    โปรดรอสักครู่...
-                  </div>
+                  <div className="mt-1 text-xs text-slate-500">โปรดรอสักครู่...</div>
                 </div>
               )}
 
-              {!loading && (!phaseRange || taskRows.length === 0) && (
-                <div className="text-sm text-slate-400">
-                  ไม่มี task หรือยังไม่มีช่วง Phase
-                </div>
+              {!loading && (!phaseRange || !sprintRange) && (
+                <div className="text-sm text-slate-400">ยังไม่มีช่วง Phase</div>
+              )}
+
+              {!loading && phaseRange && sprintRange && taskRows.length === 0 && (
+                <div className="text-sm text-slate-400">Sprint นี้ไม่มี Task</div>
               )}
 
               {!loading &&
                 phaseRange &&
+                sprintRange &&
                 taskRows.map((t) => {
                   const bars: DayBar[] = [
                     {
-                      id: t.id,
+                      id: t.key,
                       title: t.title,
                       startDay: t.startDay,
                       endDay: t.endDay,
@@ -457,14 +532,21 @@ export default function PhaseTasksModal({
 
                   return (
                     <div
-                      key={t.id}
+                      key={t.key}
                       className="rounded-2xl border border-slate-200 bg-white p-4"
                     >
                       <GanttRowLayout
                         left={
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-slate-900">
-                              {t.title}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className="truncate text-sm font-semibold text-slate-900">
+                                {t.title}
+                              </div>
+                              {(t.cutLeft || t.cutRight) && (
+                                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                  ต่อเนื่อง
+                                </span>
+                              )}
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
                               {fmtThaiDate(t.startDate)} – {fmtThaiDate(t.endDate)}
@@ -472,12 +554,11 @@ export default function PhaseTasksModal({
                           </div>
                         }
                         right={
-                          <DayTimeline
+                          <SprintTimeline
                             bars={bars}
-                            totalDays={phaseRange.totalDays}
+                            sprintDays={sprintRange.sprintDays}
                             height={52}
                             barHeight={40}
-                            showWeekSeparators
                           />
                         }
                         leftWidth={TASK_LEFT_WIDTH}
@@ -490,6 +571,45 @@ export default function PhaseTasksModal({
             <div className="h-6" />
           </div>
         </div>
+
+        {/* Footer: เปลี่ยน Sprint อยู่ล่าง */}
+        {phaseRange && sprintRange && (
+          <div className="border-t border-slate-100 bg-white px-6 py-4">
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSprintIndex((i) => Math.max(0, i - 1))}
+                disabled={!canPrev}
+                className={[
+                  "inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white",
+                  canPrev
+                    ? "border-slate-200 hover:bg-slate-50"
+                    : "border-slate-100 opacity-40",
+                ].join(" ")}
+                aria-label="Previous sprint"
+                title="Previous sprint"
+              >
+                <ChevronLeftIcon className="h-5 w-5 text-slate-700" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSprintIndex((i) => Math.min(sprintCount - 1, i + 1))}
+                disabled={!canNext}
+                className={[
+                  "inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white",
+                  canNext
+                    ? "border-slate-200 hover:bg-slate-50"
+                    : "border-slate-100 opacity-40",
+                ].join(" ")}
+                aria-label="Next sprint"
+                title="Next sprint"
+              >
+                <ChevronRightIcon className="h-5 w-5 text-slate-700" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -231,17 +231,6 @@ export default function ProjectGanttModal({
               </div>
             </div>
           </div>
-
-          {/* Footer (คงเดิม) */}
-          <div className="flex justify-end border-t border-slate-100 px-6 py-4">
-            <button
-              type="button"
-              onClick={closeAll}
-              className="h-10 rounded-2xl bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800"
-            >
-              Close
-            </button>
-          </div>
         </div>
       </div>
     </div>
