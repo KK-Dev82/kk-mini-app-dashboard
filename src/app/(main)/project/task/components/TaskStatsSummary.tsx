@@ -16,6 +16,14 @@ import {
   type TrelloMember,
 } from "../../../../lib/trelloService";
 
+import {
+  fetchProjectPhases,
+  type ProjectPhaseApi,
+} from "../../../../lib/ganttService";
+
+// ✅ POST /tasks
+import { createTask } from "../../../../lib/taskService";
+
 // ✅ Loading กลาง
 import { useAsyncLoader } from "../../../component/loading/useAsyncLoader";
 import { PageLoadingOverlay } from "../../../component/loading/LoadingUI";
@@ -50,11 +58,15 @@ type Props = {
 };
 
 type ModalMember = { id: string; name: string; avatarText?: string };
+type ModalPhase = { id: string; name: string };
 
 export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   const [lists, setLists] = useState<TrelloList[]>([]);
   const [cards, setCards] = useState<TrelloCard[]>([]);
   const [members, setMembers] = useState<TrelloMember[]>([]);
+
+  // ✅ phases
+  const [phases, setPhases] = useState<ProjectPhaseApi[]>([]);
 
   // create modal
   const [open, setOpen] = useState(false);
@@ -68,6 +80,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   const listsLoader = useAsyncLoader();
   const cardsLoader = useAsyncLoader();
   const membersLoader = useAsyncLoader();
+  const phasesLoader = useAsyncLoader();
 
   // scroller + drag state
   const scrollerRef = useRef<HTMLDivElement | null>(null);
@@ -158,6 +171,33 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ โหลด phases ของ project จาก ganttService
+  useEffect(() => {
+    if (!projectId) {
+      setPhases([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    phasesLoader
+      .run(async () => {
+        const data = await fetchProjectPhases(projectId);
+        if (cancelled) return;
+
+        const next = [...(data ?? [])].sort(
+          (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
+        );
+        setPhases(next);
+      })
+      .catch((e) => console.error("Failed to load phases", e));
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   // แปลงเป็นรูปแบบที่ TaskModal ต้องใช้
   const modalMembers: ModalMember[] = useMemo(() => {
     return (members ?? []).map((m) => ({
@@ -168,6 +208,10 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         .toUpperCase(),
     }));
   }, [members]);
+
+  const modalPhases: ModalPhase[] = useMemo(() => {
+    return (phases ?? []).map((p) => ({ id: p.id, name: p.name }));
+  }, [phases]);
 
   const groupedByListId = useMemo(() => {
     const map: Record<string, TrelloCard[]> = {};
@@ -189,7 +233,21 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
 
   const handleCreate = async (data: TaskCreatePayload) => {
     if (!activeListId) throw new Error("ไม่พบ listId ของคอลัมน์ที่กดเพิ่มการ์ด");
+    if (!projectId) throw new Error("ไม่พบ projectId ของโปรเจกต์");
+    if (!data.phaseId) throw new Error("กรุณาเลือก Phase");
 
+    // 1) ✅ สร้าง Task ในระบบ backend (/tasks)
+    await createTask({
+      title: data.name.trim(),
+      description: data.description ?? null,
+      projectId,
+      phaseId: data.phaseId,
+      assignedUserId: null,
+      dueDate: toISOFromDateInput(data.endDate) ?? null,
+      priority: "MEDIUM",
+    });
+
+    // 2) ✅ สร้าง Trello card ต่อ เพื่อให้ UI (board) เห็นทันทีเหมือนเดิม
     const cleanName = stripLeadingTag(data.name, projectTag);
 
     const created = await createTrelloCard({
@@ -265,10 +323,10 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     setDragging(false);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch { }
   };
 
-  const showOverlay = loading || membersLoader.loading;
+  const showOverlay = loading || membersLoader.loading || phasesLoader.loading;
 
   return (
     <>
@@ -364,6 +422,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         onClose={() => setOpen(false)}
         onCreate={handleCreate}
         members={modalMembers}
+        phases={modalPhases}
       />
 
       <TaskDetailModal
@@ -373,8 +432,8 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         members={members}
         projectTag={projectTag}
         lists={lists}
+        phases={modalPhases}
         onUpdated={handleCardUpdated}
-        // ✅ สำคัญ: หลังบันทึก ให้ refetch cards ใหม่ (แทน F5)
         onReload={reloadCards}
       />
 

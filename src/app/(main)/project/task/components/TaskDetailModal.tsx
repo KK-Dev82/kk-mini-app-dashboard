@@ -13,6 +13,11 @@ import {
 
 import AppDatePicker from "../../../component/datepicker/AppDatePicker";
 
+// ✅ เพิ่ม: task phase endpoints
+import { assignTaskToPhase, removeTaskFromPhase } from "../../../../lib/taskService";
+
+type PhaseOption = { id: string; name: string };
+
 function fmtTH(dateStr?: string | null) {
   if (!dateStr) return "-";
   const d = new Date(dateStr);
@@ -57,6 +62,7 @@ export default function TaskDetailModal({
   members,
   projectTag,
   lists,
+  phases, // ✅ new
   onUpdated,
   onReload,
 }: {
@@ -66,6 +72,7 @@ export default function TaskDetailModal({
   members: TrelloMember[];
   projectTag?: string;
   lists: TrelloList[];
+  phases: PhaseOption[]; // ✅ new
   onUpdated: (next: TrelloCard) => void;
 
   /** ✅ หลังบันทึก/ติ๊ก checklist ให้ refetch cards ใหม่ */
@@ -98,6 +105,9 @@ export default function TaskDetailModal({
     startDate: Date | null;
     dueDate: Date | null;
     memberIds: string[];
+
+    // ✅ new
+    phaseId: string; // "" = remove phase
   }>({
     listId: "",
     name: "",
@@ -105,6 +115,7 @@ export default function TaskDetailModal({
     startDate: null,
     dueDate: null,
     memberIds: [],
+    phaseId: "",
   });
 
   useEffect(() => {
@@ -115,6 +126,9 @@ export default function TaskDetailModal({
     setSaving(false);
     setCheckingId("");
 
+    // ✅ รองรับอนาคตถ้า card มี taskId/phaseId ติดมาจาก backend
+    const initialPhaseId = ((card as any).phaseId as string | undefined) ?? "";
+
     setForm({
       listId: (card as any).idList ?? "",
       name: card.name ?? "",
@@ -122,6 +136,7 @@ export default function TaskDetailModal({
       startDate: card.start ? new Date(card.start) : null,
       dueDate: card.due ? new Date(card.due) : null,
       memberIds: uniq(card.idMembers ?? []),
+      phaseId: initialPhaseId,
     });
   }, [card?.id]);
 
@@ -171,7 +186,7 @@ export default function TaskDetailModal({
       // 3) refetch เพื่อให้ badges/progress ตรง backend (แทน F5)
       await onReload();
     } catch (e) {
-      // rollback (ถ้า error ให้กลับไป state เดิม)
+      // rollback
       patchChecklistItem(checkItemId, currentState === "complete" ? "complete" : "incomplete");
 
       const msg = e instanceof Error ? e.message : "Update checklist failed";
@@ -191,7 +206,7 @@ export default function TaskDetailModal({
 
       setSaving(true);
 
-      // 1) update card details
+      // 1) update trello card details
       const updated = await updateTrelloCard(card.id, {
         listId: form.listId.trim(),
         name: form.name.trim(),
@@ -220,14 +235,26 @@ export default function TaskDetailModal({
         }
       }
 
-      // 3) optimistic patch
+      // 3) ✅ sync phase (backend tasks)
+      const taskId = ((card as any).taskId as string | undefined) ?? card.id;
+
+      if (form.phaseId.trim()) {
+        await assignTaskToPhase(taskId, form.phaseId.trim());
+      } else {
+        await removeTaskFromPhase(taskId);
+      }
+
+      // 4) optimistic patch
       onUpdated({
         ...card,
         ...updated,
         idMembers: uniq(form.memberIds ?? []),
-      });
 
-      // 4) refetch (เอา checklist/badges กลับมาครบ)
+        // ✅ เก็บ phaseId ไว้ใน card object ชั่วคราวเพื่อให้เปิด modal รอบหน้าเห็นค่าเดิม
+        ...(form.phaseId ? { phaseId: form.phaseId } : { phaseId: "" }),
+      } as any);
+
+      // 5) refetch (เอา checklist/badges กลับมาครบ)
       await onReload();
 
       setEditing(false);
@@ -439,6 +466,29 @@ export default function TaskDetailModal({
                   </button>
                 ) : (
                   <div className="space-y-3">
+                    {/* ✅ phase picker */}
+                    <div className="space-y-1">
+                      <div className="text-xs text-white/60">Phase</div>
+                      <select
+                        value={form.phaseId}
+                        onChange={(e) => setForm((p) => ({ ...p, phaseId: e.target.value }))}
+                        className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                        disabled={saving}
+                      >
+                        <option value="" className="text-slate-900">
+                          (ไม่อยู่ใน Phase)
+                        </option>
+                        {(phases ?? []).map((p) => (
+                          <option key={p.id} value={p.id} className="text-slate-900">
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="text-[11px] text-white/40">
+                        * เลือก “ไม่อยู่ใน Phase” แล้วกดบันทึก = เรียก remove-phase
+                      </div>
+                    </div>
+
                     {/* list */}
                     <div className="space-y-1">
                       <div className="text-xs text-white/60">คอลัมน์ (List)</div>

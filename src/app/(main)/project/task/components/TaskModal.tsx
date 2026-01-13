@@ -10,15 +10,22 @@ export type TaskCreatePayload = {
   endDate?: string; // YYYY-MM-DD
   memberIds?: string[];
   subtasks?: string[];
+
+  // ✅ เพิ่ม: ต้องเลือก Phase
+  phaseId: string;
 };
 
 type Member = { id: string; name: string; avatarText?: string };
+type Phase = { id: string; name: string };
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onCreate: (data: TaskCreatePayload) => void | Promise<void>;
   members?: Member[];
+
+  // ✅ เพิ่ม: phases สำหรับ dropdown
+  phases?: Phase[];
 };
 
 function Label({ children }: { children: React.ReactNode }) {
@@ -150,10 +157,93 @@ function MembersDropdown({
   );
 }
 
-export default function TaskModal({ open, onClose, onCreate, members }: Props) {
-  // ✅ เอา fallback JS/K ออก เพื่อไม่ให้หลอกตา
+function PhaseDropdown({
+  phases,
+  value,
+  onChange,
+  disabled,
+}: {
+  phases: Phase[];
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const selected = useMemo(
+    () => phases.find((p) => p.id === value) ?? null,
+    [phases, value]
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((s) => !s)}
+        className={[
+          "flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm",
+          disabled ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50",
+        ].join(" ")}
+      >
+        <div className="flex items-center gap-2">
+          {!selected ? (
+            <span className="text-slate-500">เลือก Phase</span>
+          ) : (
+            <span className="text-slate-800">{selected.name}</span>
+          )}
+        </div>
+        <ChevronDownIcon className="h-5 w-5 text-slate-500" />
+      </button>
+
+      {!disabled && open && (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 cursor-default"
+            onClick={() => setOpen(false)}
+            aria-label="close phase dropdown"
+          />
+          <div className="absolute z-50 mt-2 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+            {phases.length === 0 ? (
+              <div className="px-2 py-2 text-sm text-slate-500">ไม่พบ Phase</div>
+            ) : (
+              phases.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(p.id);
+                    setOpen(false);
+                  }}
+                  className={[
+                    "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50",
+                    p.id === value ? "bg-slate-100" : "",
+                  ].join(" ")}
+                >
+                  {p.name}
+                </button>
+              ))
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function TaskModal({
+  open,
+  onClose,
+  onCreate,
+  members,
+  phases,
+}: Props) {
   const memberOptions = useMemo<Member[]>(() => members ?? [], [members]);
   const membersReady = (members ?? []).length > 0;
+
+  const phaseOptions = useMemo<Phase[]>(() => phases ?? [], [phases]);
+  const phasesReady = (phases ?? []).length > 0;
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -162,6 +252,9 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
   const [endDate, setEndDate] = useState("");
 
   const [memberIds, setMemberIds] = useState<string[]>([]);
+
+  // ✅ phase required
+  const [phaseId, setPhaseId] = useState<string>("");
 
   const [hasSubtasks, setHasSubtasks] = useState(false);
   const [subtasks, setSubtasks] = useState<string[]>([""]);
@@ -183,6 +276,7 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
     setStartDate("");
     setEndDate("");
     setMemberIds([]);
+    setPhaseId("");
     setHasSubtasks(false);
     setSubtasks([""]);
     setError(null);
@@ -195,6 +289,11 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError("กรุณากรอกชื่อ Task");
+      return;
+    }
+
+    if (!phaseId.trim()) {
+      setError("กรุณาเลือก Phase");
       return;
     }
 
@@ -212,6 +311,7 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
         endDate: endDate || undefined,
         memberIds,
         subtasks: cleanedSubtasks,
+        phaseId,
       });
 
       resetForm();
@@ -274,6 +374,22 @@ export default function TaskModal({ open, onClose, onCreate, members }: Props) {
               placeholder="อธิบายงานคร่าว ๆ ..."
               disabled={submitting}
             />
+          </div>
+
+          {/* ✅ Phase required */}
+          <div className="mt-4">
+            <Label>Phase</Label>
+            <PhaseDropdown
+              phases={phaseOptions}
+              value={phaseId}
+              onChange={setPhaseId}
+              disabled={!phasesReady}
+            />
+            {!phasesReady && (
+              <div className="mt-1 text-[11px] text-slate-500">
+                กำลังโหลด Phase...
+              </div>
+            )}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
