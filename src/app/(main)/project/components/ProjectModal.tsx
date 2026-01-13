@@ -129,6 +129,62 @@ function getMemberUserId(m: ProjectMemberApi): string | undefined {
   return anyM.userId ?? anyM.user?.id ?? anyM.user?.userId ?? anyM.idUser;
 }
 
+// =========================
+// ✅ Date helpers (Phase within Project)
+// =========================
+function toDateOnly(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function isValidDate(d?: Date | null) {
+  return !!d && !Number.isNaN(d.getTime());
+}
+function clampDateToRange(d: Date, min: Date, max: Date) {
+  const x = toDateOnly(d);
+  const mn = toDateOnly(min);
+  const mx = toDateOnly(max);
+  if (x.getTime() < mn.getTime()) return mn;
+  if (x.getTime() > mx.getTime()) return mx;
+  return x;
+}
+
+function validatePhaseWithinProject(params: {
+  projectStart: Date | null;
+  projectDue: Date | null;
+  phaseStart: Date | null;
+  phaseDue: Date | null;
+}) {
+  const { projectStart, projectDue, phaseStart, phaseDue } = params;
+
+  if (!isValidDate(projectStart) || !isValidDate(projectDue)) {
+    return { ok: false as const, reason: "กรุณากำหนด Start/Due date ของ Project ก่อน" };
+  }
+  const ps = toDateOnly(projectStart!);
+  const pd = toDateOnly(projectDue!);
+
+  if (!isValidDate(phaseStart) || !isValidDate(phaseDue)) {
+    return { ok: false as const, reason: "กรุณาเลือก Start date และ Due date ของ Phase" };
+  }
+  const s = toDateOnly(phaseStart!);
+  const e = toDateOnly(phaseDue!);
+
+  if (e.getTime() < s.getTime()) {
+    return { ok: false as const, reason: "Due date ของ Phase ต้องไม่ก่อน Start date" };
+  }
+  if (s.getTime() < ps.getTime()) {
+    return {
+      ok: false as const,
+      reason: "Start date ของ Phase ต้องไม่ก่อนวันเริ่ม Project",
+    };
+  }
+  if (e.getTime() > pd.getTime()) {
+    return {
+      ok: false as const,
+      reason: "Due date ของ Phase ต้องไม่เกินวันสิ้นสุด Project",
+    };
+  }
+  return { ok: true as const };
+}
+
 function ProjectModalInner({
   initial,
   onClose,
@@ -153,10 +209,9 @@ function ProjectModalInner({
   const [allUsers, setAllUsers] = useState<UserApi[]>([]);
   const [initialMembers, setInitialMembers] = useState<ProjectMemberApi[]>([]);
   // ✅ เก็บ null เพื่อ "ติ๊กออก" โดยไม่ลบ key (กัน UI หาย)
-  const [selected, setSelected] = useState<Record<
-    string,
-    ProjectMemberRole | null
-  >>({});
+  const [selected, setSelected] = useState<Record<string, ProjectMemberRole | null>>(
+    {}
+  );
   const [userQuery, setUserQuery] = useState("");
 
   const isEdit = !!initial?.id;
@@ -367,7 +422,8 @@ function ProjectModalInner({
       if (!before.has(uid)) toAdd.push({ userId: uid, role });
       else {
         const prevRole = before.get(uid);
-        if (prevRole && prevRole !== role) toUpdateRole.push({ userId: uid, role });
+        if (prevRole && prevRole !== role)
+          toUpdateRole.push({ userId: uid, role });
       }
     }
     for (const uid of before.keys()) {
@@ -377,7 +433,9 @@ function ProjectModalInner({
     await Promise.all([
       ...toAdd.map((p) => addProjectMember(projectId, p)),
       ...toRemove.map((uid) => removeProjectMember(projectId, uid)),
-      ...toUpdateRole.map((p) => updateProjectMemberRole(projectId, p.userId, p.role)),
+      ...toUpdateRole.map((p) =>
+        updateProjectMemberRole(projectId, p.userId, p.role)
+      ),
     ]);
   };
 
@@ -393,6 +451,59 @@ function ProjectModalInner({
     await Promise.all(toAdd.map((p) => addProjectMember(projectId, p)));
   };
 
+  // =========================
+  // ✅ Phase date clamp (อิง Project ใน form)
+  // =========================
+  const projectStart = form.startDate;
+  const projectDue = form.dueDate;
+
+  const clampToProject = (d: Date | null) => {
+    if (!d) return null;
+    if (!isValidDate(projectStart) || !isValidDate(projectDue)) return toDateOnly(d);
+    return clampDateToRange(d, projectStart!, projectDue!);
+  };
+
+  // ✅ ถ้าเปิด add phase → default = ช่วงของ Project
+  const toggleAddPhase = () => {
+    setEnableAddPhase((v) => {
+      const next = !v;
+      setPhaseSubmitError("");
+
+      if (next) {
+        // ตอนเปิด: set ค่า default ให้เป็นของ Project ถ้ามี
+        if (isValidDate(projectStart) && !phaseStartDate) setPhaseStartDate(toDateOnly(projectStart!));
+        if (isValidDate(projectDue) && !phaseDueDate) setPhaseDueDate(toDateOnly(projectDue!));
+
+        // ถ้า project มี start/due แต่ phase ยังว่าง → ตั้งให้ครบ
+        if (isValidDate(projectStart) && isValidDate(projectDue)) {
+          setPhaseStartDate((prev) => prev ?? toDateOnly(projectStart!));
+          setPhaseDueDate((prev) => prev ?? toDateOnly(projectDue!));
+        }
+      }
+
+      return next;
+    });
+  };
+
+  // ✅ ถ้า Project date เปลี่ยนระหว่าง edit → clamp phase ให้ไม่หลุดช่วง
+  useEffect(() => {
+    if (!enableAddPhase) return;
+    if (!isValidDate(projectStart) || !isValidDate(projectDue)) return;
+
+    setPhaseStartDate((prev) => (prev ? clampToProject(prev) : prev));
+    setPhaseDueDate((prev) => (prev ? clampToProject(prev) : prev));
+
+    // และกันกรณี due < start
+    setPhaseDueDate((prev) => {
+      if (!prev || !phaseStartDate) return prev;
+      const s = clampToProject(phaseStartDate);
+      const e = clampToProject(prev);
+      if (!s || !e) return prev;
+      return e.getTime() < s.getTime() ? s : e;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enableAddPhase, form.startDate, form.dueDate]);
+
   // ✅ สร้าง Phase (POST /projects/{projectId}/phases) จาก ganttService
   const handleCreatePhase = async () => {
     if (!initial?.id) return;
@@ -401,10 +512,19 @@ function ProjectModalInner({
 
     const name = phaseName.trim();
     if (!name) return setPhaseSubmitError("กรุณากรอกชื่อ Phase");
-    if (!phaseStartDate || !phaseDueDate)
-      return setPhaseSubmitError("กรุณาเลือก Start date และ Due date");
-    if (phaseDueDate.getTime() < phaseStartDate.getTime())
-      return setPhaseSubmitError("Due date ต้องไม่ก่อน Start date");
+
+    // ✅ validate ภายใต้ช่วง Project (อิงค่าจาก form)
+    const v = validatePhaseWithinProject({
+      projectStart: projectStart,
+      projectDue: projectDue,
+      phaseStart: phaseStartDate,
+      phaseDue: phaseDueDate,
+    });
+
+    if (!v.ok) {
+      setPhaseSubmitError(v.reason);
+      return;
+    }
 
     // ✅ สำคัญ: orderIndex ต้องเป็น integer (แก้ 400)
     const nextOrderIndex =
@@ -417,8 +537,8 @@ function ProjectModalInner({
       description: null,
       orderIndex: nextOrderIndex, // ✅ required
       status: "NOT_STARTED",
-      startDate: toISOFromDateNoShift(phaseStartDate),
-      dueDate: toISOFromDateNoShift(phaseDueDate),
+      startDate: toISOFromDateNoShift(toDateOnly(phaseStartDate!)),
+      dueDate: toISOFromDateNoShift(toDateOnly(phaseDueDate!)),
     };
 
     setPhaseSaving(true);
@@ -617,10 +737,6 @@ function ProjectModalInner({
             </div>
           </div>
 
-          {/* =========================
-              ✅ PHASE UI (ตามรูปที่ต้องการ)
-              เฉพาะตอน Edit เท่านั้น
-             ========================= */}
           {isEdit && initial?.id && (
             <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
               <div className="flex items-start justify-between gap-3">
@@ -629,15 +745,18 @@ function ProjectModalInner({
                   <div className="text-[11px] text-slate-500">
                     เปิดใช้งานเพื่อเพิ่ม Phase (ชื่อ + Start date + Due date)
                   </div>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    ช่วง Project:{" "}
+                    <span className="font-semibold text-slate-700">
+                      {form.startDate ? form.startDate.toLocaleDateString("th-TH") : "-"} –{" "}
+                      {form.dueDate ? form.dueDate.toLocaleDateString("th-TH") : "-"}
+                    </span>
+                  </div>
                 </div>
 
-                {/* toggle */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setEnableAddPhase((v) => !v);
-                    setPhaseSubmitError("");
-                  }}
+                  onClick={toggleAddPhase}
                   className={[
                     "relative inline-flex h-7 w-12 items-center rounded-full transition",
                     enableAddPhase ? "bg-blue-600" : "bg-slate-300",
@@ -669,19 +788,47 @@ function ProjectModalInner({
                       <label className="text-xs font-medium text-slate-700">Start date</label>
                       <AppDatePicker
                         value={phaseStartDate}
-                        onChange={(d) => setPhaseStartDate(d)}
+                        onChange={(d) => {
+                          const clamped = d ? clampToProject(d) : null;
+                          setPhaseStartDate(clamped);
+
+                          // ถ้า due < start → ดัน due ให้เท่ากับ start
+                          setPhaseDueDate((prev) => {
+                            if (!prev || !clamped) return prev;
+                            const e = clampToProject(prev);
+                            if (!e) return prev;
+                            return e.getTime() < clamped.getTime() ? clamped : e;
+                          });
+                        }}
                         placeholder="วัน/เดือน/ปี"
                         disabled={phaseSaving || submitting}
+                        // ✅ อย่างน้อยให้ไม่ก่อน start ของ project
+                        minDate={form.startDate ?? undefined}
                       />
+                      {!form.startDate || !form.dueDate ? (
+                        <div className="text-[11px] text-slate-500">
+                          * ต้องกำหนด Start/Due date ของ Project ก่อน ถึงจะเพิ่ม Phase ได้ถูกต้อง
+                        </div>
+                      ) : null}
                     </div>
 
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-slate-700">Due date</label>
                       <AppDatePicker
                         value={phaseDueDate}
-                        onChange={(d) => setPhaseDueDate(d)}
+                        onChange={(d) => {
+                          const clamped = d ? clampToProject(d) : null;
+
+                          // due ต้อง >= start
+                          const start = phaseStartDate ? clampToProject(phaseStartDate) : null;
+                          if (clamped && start && clamped.getTime() < start.getTime()) {
+                            setPhaseDueDate(start);
+                          } else {
+                            setPhaseDueDate(clamped);
+                          }
+                        }}
                         placeholder="วัน/เดือน/ปี"
-                        minDate={phaseStartDate ?? undefined}
+                        minDate={phaseStartDate ?? form.startDate ?? undefined}
                         disabled={phaseSaving || submitting}
                       />
                     </div>
@@ -809,7 +956,10 @@ function ProjectModalInner({
                         : "MEMBER";
 
                       return (
-                        <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50">
+                        <div
+                          key={u.id}
+                          className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50"
+                        >
                           <label className="flex items-center gap-3 cursor-pointer flex-1">
                             <input
                               type="checkbox"
@@ -824,7 +974,9 @@ function ProjectModalInner({
                             </span>
 
                             <div className="min-w-0">
-                              <div className="text-sm font-medium text-slate-900 truncate">{u.name}</div>
+                              <div className="text-sm font-medium text-slate-900 truncate">
+                                {u.name}
+                              </div>
                               <div className="text-xs text-slate-500 truncate">{u.email}</div>
                             </div>
                           </label>
@@ -833,7 +985,9 @@ function ProjectModalInner({
                             <select
                               className="rounded-xl border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                               value={safeValue}
-                              onChange={(e) => changeRole(u.id, e.target.value as ProjectMemberRole)}
+                              onChange={(e) =>
+                                changeRole(u.id, e.target.value as ProjectMemberRole)
+                              }
                               disabled={submitting}
                               title="Role"
                             >
@@ -852,7 +1006,9 @@ function ProjectModalInner({
               </div>
             </div>
 
-            <div className="text-[11px] text-slate-400">* ลบสมาชิก = เอาติ๊กออก (ตอนกดบันทึกจะ sync ให้)</div>
+            <div className="text-[11px] text-slate-400">
+              * ลบสมาชิก = เอาติ๊กออก (ตอนกดบันทึกจะ sync ให้)
+            </div>
           </div>
 
           {submitError ? (
