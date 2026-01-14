@@ -6,25 +6,35 @@ import { XMarkIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 export type TaskCreatePayload = {
   name: string;
   description?: string;
+  /** "" = ไม่อยู่ใน Phase */
+  phaseId?: string;
   startDate?: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
   memberIds?: string[];
   subtasks?: string[];
-
-  // ✅ เพิ่ม: ต้องเลือก Phase
-  phaseId: string;
 };
 
 type Member = { id: string; name: string; avatarText?: string };
-type Phase = { id: string; name: string };
+
+// ✅ Phase ต้องมี startDate/dueDate เพื่อเช็คช่วงวันที่
+type Phase = {
+  id: string;
+  name: string;
+  startDate?: string | null; // ISO
+  dueDate?: string | null; // ISO
+};
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  onCreate: (data: TaskCreatePayload) => void | Promise<void>;
-  members?: Member[];
 
-  // ✅ เพิ่ม: phases สำหรับ dropdown
+  /**
+   * ✅ modal นี้ไม่ยิง phase เองแล้ว
+   * ให้ parent ทำ POST+PATCH ทั้งหมด แล้วค่อยสร้าง Trello card / set state
+   */
+  onCreate: (data: TaskCreatePayload) => Promise<{ id: string }>;
+
+  members?: Member[];
   phases?: Phase[];
 };
 
@@ -41,8 +51,9 @@ function InputBase(props: React.InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={[
-        "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900",
-        "outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100",
+        "w-full rounded-xl border bg-white px-4 py-3 text-sm text-slate-900",
+        "outline-none focus:ring-2",
+        "border-slate-200 focus:border-blue-500 focus:ring-blue-100",
         props.className ?? "",
       ].join(" ")}
     />
@@ -128,9 +139,7 @@ function MembersDropdown({
           />
           <div className="absolute z-50 mt-2 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
             {members.length === 0 ? (
-              <div className="px-2 py-2 text-sm text-slate-500">
-                ไม่พบสมาชิก
-              </div>
+              <div className="px-2 py-2 text-sm text-slate-500">ไม่พบสมาชิก</div>
             ) : (
               members.map((m) => (
                 <label
@@ -164,7 +173,7 @@ function PhaseDropdown({
   disabled,
 }: {
   phases: Phase[];
-  value: string;
+  value: string; // "" = no phase
   onChange: (next: string) => void;
   disabled?: boolean;
 }) {
@@ -205,6 +214,22 @@ function PhaseDropdown({
             aria-label="close phase dropdown"
           />
           <div className="absolute z-50 mt-2 w-full rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+              className={[
+                "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-50",
+                value === "" ? "bg-slate-100" : "",
+              ].join(" ")}
+            >
+              ไม่อยู่ใน Phase
+            </button>
+
+            <div className="my-1 h-px bg-slate-100" />
+
             {phases.length === 0 ? (
               <div className="px-2 py-2 text-sm text-slate-500">ไม่พบ Phase</div>
             ) : (
@@ -232,13 +257,21 @@ function PhaseDropdown({
   );
 }
 
-export default function TaskModal({
-  open,
-  onClose,
-  onCreate,
-  members,
-  phases,
-}: Props) {
+function isoToDateOnly(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function isDateStrValid(v: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+export default function TaskModal({ open, onClose, onCreate, members, phases }: Props) {
   const memberOptions = useMemo<Member[]>(() => members ?? [], [members]);
   const membersReady = (members ?? []).length > 0;
 
@@ -248,19 +281,48 @@ export default function TaskModal({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
+  const [phaseId, setPhaseId] = useState<string>(""); // "" = no phase
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
   const [memberIds, setMemberIds] = useState<string[]>([]);
-
-  // ✅ phase required
-  const [phaseId, setPhaseId] = useState<string>("");
-
   const [hasSubtasks, setHasSubtasks] = useState(false);
   const [subtasks, setSubtasks] = useState<string[]>([""]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selectedPhase = useMemo(
+    () => phaseOptions.find((p) => p.id === phaseId) ?? null,
+    [phaseOptions, phaseId]
+  );
+
+  const phaseMin = useMemo(
+    () => isoToDateOnly(selectedPhase?.startDate ?? null),
+    [selectedPhase?.startDate]
+  );
+  const phaseMax = useMemo(
+    () => isoToDateOnly(selectedPhase?.dueDate ?? null),
+    [selectedPhase?.dueDate]
+  );
+
+  const startOutOfPhase = useMemo(() => {
+    if (!selectedPhase || !phaseMin || !phaseMax) return false;
+    if (!startDate || !isDateStrValid(startDate)) return false;
+    return startDate < phaseMin || startDate > phaseMax;
+  }, [selectedPhase, phaseMin, phaseMax, startDate]);
+
+  const endOutOfPhase = useMemo(() => {
+    if (!selectedPhase || !phaseMin || !phaseMax) return false;
+    if (!endDate || !isDateStrValid(endDate)) return false;
+    return endDate < phaseMin || endDate > phaseMax;
+  }, [selectedPhase, phaseMin, phaseMax, endDate]);
+
+  const rangeInvalid = useMemo(() => {
+    if (!startDate || !endDate) return false;
+    if (!isDateStrValid(startDate) || !isDateStrValid(endDate)) return false;
+    return startDate > endDate;
+  }, [startDate, endDate]);
 
   if (!open) return null;
 
@@ -273,10 +335,10 @@ export default function TaskModal({
   const resetForm = () => {
     setName("");
     setDescription("");
+    setPhaseId("");
     setStartDate("");
     setEndDate("");
     setMemberIds([]);
-    setPhaseId("");
     setHasSubtasks(false);
     setSubtasks([""]);
     setError(null);
@@ -292,8 +354,8 @@ export default function TaskModal({
       return;
     }
 
-    if (!phaseId.trim()) {
-      setError("กรุณาเลือก Phase");
+    if (rangeInvalid) {
+      setError("Due Date ต้องไม่ก่อน Start Date");
       return;
     }
 
@@ -307,17 +369,17 @@ export default function TaskModal({
       await onCreate({
         name: trimmedName,
         description: description.trim() || undefined,
+        phaseId,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         memberIds,
         subtasks: cleanedSubtasks,
-        phaseId,
       });
 
       resetForm();
       onClose();
     } catch (err: any) {
-      setError(err?.message ?? "สร้างการ์ดไม่สำเร็จ");
+      setError(err?.message ?? "บันทึก Task ไม่สำเร็จ");
     } finally {
       setSubmitting(false);
     }
@@ -376,7 +438,6 @@ export default function TaskModal({
             />
           </div>
 
-          {/* ✅ Phase required */}
           <div className="mt-4">
             <Label>Phase</Label>
             <PhaseDropdown
@@ -390,6 +451,12 @@ export default function TaskModal({
                 กำลังโหลด Phase...
               </div>
             )}
+
+            {selectedPhase && phaseMin && phaseMax ? (
+              <div className="mt-1 text-[11px] text-slate-500">
+                ช่วง Phase: {phaseMin} – {phaseMax}
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -400,8 +467,19 @@ export default function TaskModal({
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 disabled={submitting}
+                className={
+                  startOutOfPhase || rangeInvalid
+                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
+                    : ""
+                }
               />
+              {startOutOfPhase ? (
+                <div className="mt-1 text-[11px] text-red-600">
+                  วันที่อยู่นอกช่วงของ Phase
+                </div>
+              ) : null}
             </div>
+
             <div>
               <Label>Due Date</Label>
               <InputBase
@@ -409,9 +487,25 @@ export default function TaskModal({
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 disabled={submitting}
+                className={
+                  endOutOfPhase || rangeInvalid
+                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
+                    : ""
+                }
               />
+              {endOutOfPhase ? (
+                <div className="mt-1 text-[11px] text-red-600">
+                  วันที่อยู่นอกช่วงของ Phase
+                </div>
+              ) : null}
             </div>
           </div>
+
+          {rangeInvalid ? (
+            <div className="mt-2 text-[11px] text-red-600">
+              Due Date ต้องไม่ก่อน Start Date
+            </div>
+          ) : null}
 
           <div className="mt-4">
             <Label>Assignees</Label>

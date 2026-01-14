@@ -18,6 +18,29 @@ export type GanttTaskApi = {
   color: GanttTaskColor;
 };
 
+/**
+ * ✅ Task ที่อยู่ใน ProjectPhaseApi.tasks (ตาม swagger ของ GET /projects/{projectId}/phases)
+ * ใช้สำหรับ map phase <-> trello card ด้วย trelloCardId
+ */
+export type ProjectPhaseTaskApi = {
+  id: string;
+  trelloCardId?: string | null;
+
+  title?: string | null;
+  description?: string | null;
+  status?: string | null;
+  priority?: string | null;
+
+  assignedUserId?: string | null;
+  worksiteId?: string | null;
+
+  projectId?: string | null;
+  phaseId?: string | null;
+
+  startDate?: string | null; // ISO
+  dueDate?: string | null; // ISO
+};
+
 /** จาก swagger: GET /projects/{projectId}/phases */
 export type ProjectPhaseApi = {
   id: string;
@@ -32,7 +55,9 @@ export type ProjectPhaseApi = {
   createdAt?: string;
   updatedAt?: string;
   projectId: string;
-  tasks?: unknown[];
+
+  // ✅ แก้จาก unknown[] -> typed (มี trelloCardId)
+  tasks?: ProjectPhaseTaskApi[];
 };
 
 export async function fetchProjectPhases(
@@ -76,20 +101,34 @@ export type PhaseTaskApi = {
   dueDate?: string | null; // ISO
   status?: string | null;
   orderIndex?: number | null;
+
+  // ✅ เผื่อ detail endpoint ส่ง trelloCardId มาด้วย (ไม่บังคับ)
+  trelloCardId?: string | null;
 };
 
 export type ProjectPhaseDetailApi = ProjectPhaseApi & {
   tasks?: PhaseTaskApi[];
 };
 
+/**
+ * ✅ swagger: GET /projects/{projectId}/phases/{id}?sprint=1&limit=50
+ * sprint/limit = required ตามที่บอก
+ */
 export async function fetchProjectPhaseById(
   projectId: string,
-  phaseId: string
+  phaseId: string,
+  sprint: number,
+  limit: number
 ): Promise<ProjectPhaseDetailApi> {
+  const qs = new URLSearchParams({
+    sprint: String(sprint),
+    limit: String(limit),
+  }).toString();
+
   return apiGet<ProjectPhaseDetailApi>(
     `/projects/${encodeURIComponent(projectId)}/phases/${encodeURIComponent(
       phaseId
-    )}`,
+    )}?${qs}`,
     { useEnvToken: true }
   );
 }

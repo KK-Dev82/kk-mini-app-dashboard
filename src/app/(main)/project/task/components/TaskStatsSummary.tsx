@@ -11,6 +11,7 @@ import {
   createTrelloCard,
   fetchTrelloLists,
   fetchTrelloMembers,
+  assignTrelloCardToPhase,
   type TrelloCard,
   type TrelloList,
   type TrelloMember,
@@ -21,10 +22,6 @@ import {
   type ProjectPhaseApi,
 } from "../../../../lib/ganttService";
 
-// ✅ POST /tasks
-import { createTask } from "../../../../lib/taskService";
-
-// ✅ Loading กลาง
 import { useAsyncLoader } from "../../../component/loading/useAsyncLoader";
 import { PageLoadingOverlay } from "../../../component/loading/LoadingUI";
 
@@ -45,10 +42,7 @@ function escapeRegExp(s: string) {
 function stripLeadingTag(name: string, tag: string) {
   const t = tag.trim();
   if (!t) return name.trim();
-  const re = new RegExp(
-    `^\\s*(?:\\[\\s*${escapeRegExp(t)}\\s*\\]\\s*)+`,
-    "i"
-  );
+  const re = new RegExp(`^\\s*(?:\\[\\s*${escapeRegExp(t)}\\s*\\]\\s*)+`, "i");
   return name.replace(re, "").trim();
 }
 
@@ -58,15 +52,27 @@ type Props = {
 };
 
 type ModalMember = { id: string; name: string; avatarText?: string };
-type ModalPhase = { id: string; name: string };
+type ModalPhase = {
+  id: string;
+  name: string;
+  startDate?: string | null;
+  dueDate?: string | null;
+};
+
+// ✅ เก็บข้อมูล phase ต่อ card
+type CardPhaseInfo = { phaseId: string; phaseName: string };
+type PhaseMap = Record<string, CardPhaseInfo>; // key = trelloCardId
 
 export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   const [lists, setLists] = useState<TrelloList[]>([]);
   const [cards, setCards] = useState<TrelloCard[]>([]);
   const [members, setMembers] = useState<TrelloMember[]>([]);
 
-  // ✅ phases
+  // ✅ phases ของ project
   const [phases, setPhases] = useState<ProjectPhaseApi[]>([]);
+
+  // ✅ map: cardId -> {phaseId, phaseName}
+  const [phaseMap, setPhaseMap] = useState<PhaseMap>({});
 
   // create modal
   const [open, setOpen] = useState(false);
@@ -92,25 +98,52 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   });
   const [dragging, setDragging] = useState(false);
 
+  // ✅ helper: เอา phaseMap ไปแปะลง card (ให้ TaskCard/TaskDetailModal อ่านได้)
+  const applyPhaseToCards = (arr: TrelloCard[], map: PhaseMap) => {
+    if (!arr?.length) return arr;
+    if (!map || Object.keys(map).length === 0) return arr;
+
+    return arr.map((c) => {
+      const hit = map[c.id];
+      if (!hit) return c;
+
+      return {
+        ...(c as any),
+        phaseId: hit.phaseId,
+        phaseName: hit.phaseName,
+      } as any;
+    });
+  };
+
   // ✅ reload cards (แทน F5)
   const reloadCards = async () => {
     const data = await fetchTrelloCardsByTag(projectTag);
     const next = (data ?? []).filter((c) => !c.closed);
-    setCards(next);
+
+    const withPhase = applyPhaseToCards(next, phaseMap);
+    setCards(withPhase);
 
     // ✅ sync activeCard ถ้ากำลังเปิดอยู่
     setActiveCard((prev) => {
       if (!prev?.id) return prev;
-      return next.find((x) => x.id === prev.id) ?? prev;
+      return withPhase.find((x) => x.id === prev.id) ?? prev;
     });
   };
 
-  // ✅ สำคัญ: handle update แบบ “เร็ว” (ใช้ตอนอยาก patch เฉพาะบาง field)
   const handleCardUpdated = (updated: TrelloCard) => {
     if (!updated?.id) return;
 
-    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-    setActiveCard((prev) => (prev?.id === updated.id ? updated : prev));
+    const hit = phaseMap[updated.id];
+    const patched = hit
+      ? ({
+          ...(updated as any),
+          phaseId: hit.phaseId,
+          phaseName: hit.phaseName,
+        } as any as TrelloCard)
+      : updated;
+
+    setCards((prev) => prev.map((c) => (c.id === patched.id ? patched : c)));
+    setActiveCard((prev) => (prev?.id === patched.id ? patched : prev));
   };
 
   // โหลด lists
@@ -143,13 +176,15 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         const data = await fetchTrelloCardsByTag(projectTag);
         if (cancelled) return;
 
-        setCards((data ?? []).filter((c) => !c.closed));
+        const base = (data ?? []).filter((c) => !c.closed);
+        setCards(applyPhaseToCards(base, phaseMap));
       })
       .catch((e) => console.error("Failed to load trello cards by tag", e));
 
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectTag]);
 
   // โหลด members
@@ -171,10 +206,14 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ โหลด phases ของ project จาก ganttService
+  // ✅ โหลด phases ของ project จาก ganttService แล้วสร้าง phaseMap จาก tasks[].trelloCardId
   useEffect(() => {
     if (!projectId) {
       setPhases([]);
+      setPhaseMap({});
+      // optional: เคลียร์การแปะ phase ออกจาก cards
+      setCards((prev) => applyPhaseToCards(prev, {}));
+      setActiveCard((prev) => prev);
       return;
     }
 
@@ -189,6 +228,34 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
           (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
         );
         setPhases(next);
+
+        // ✅ สร้าง map: trelloCardId -> phaseId/phaseName (ยิงครั้งเดียวจบ)
+        const map: PhaseMap = {};
+        for (const ph of next) {
+          for (const t of ph.tasks ?? []) {
+            // ต้องมี trelloCardId
+            const cardId = ((t as any).trelloCardId ?? "").trim();
+            if (!cardId) continue;
+
+            // ถ้าซ้ำหลาย phase ให้ยึด phase แรกตาม orderIndex (next ถูก sort แล้ว)
+            if (!map[cardId]) {
+              map[cardId] = { phaseId: ph.id, phaseName: ph.name };
+            }
+          }
+        }
+
+        setPhaseMap(map);
+
+        // ✅ แปะให้ cards ที่โหลดไว้แล้ว
+        setCards((prev) => applyPhaseToCards(prev, map));
+
+        // ✅ และอัปเดต activeCard ถ้า modal เปิดอยู่
+        setActiveCard((prev) => {
+          if (!prev?.id) return prev;
+          const hit = map[prev.id];
+          if (!hit) return prev;
+          return { ...(prev as any), phaseId: hit.phaseId, phaseName: hit.phaseName } as any;
+        });
       })
       .catch((e) => console.error("Failed to load phases", e));
 
@@ -209,8 +276,14 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     }));
   }, [members]);
 
+  // ✅ ส่ง startDate/dueDate ไปให้ modal ด้วย
   const modalPhases: ModalPhase[] = useMemo(() => {
-    return (phases ?? []).map((p) => ({ id: p.id, name: p.name }));
+    return (phases ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      startDate: p.startDate ?? null,
+      dueDate: p.dueDate ?? null,
+    }));
   }, [phases]);
 
   const groupedByListId = useMemo(() => {
@@ -231,26 +304,18 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     return map;
   }, [lists, cards]);
 
-  const handleCreate = async (data: TaskCreatePayload) => {
+  /**
+   * ✅ Create:
+   * 1) POST /trello/cards
+   * 2) (ถ้าเลือก Phase) PUT /trello/cards/{cardId}/phase -> backend create task + ผูก Phase
+   * 3) setCards + update phaseMap เพื่อให้ UI เห็นทันที
+   */
+  const handleCreate = async (data: TaskCreatePayload): Promise<{ id: string }> => {
     if (!activeListId) throw new Error("ไม่พบ listId ของคอลัมน์ที่กดเพิ่มการ์ด");
-    if (!projectId) throw new Error("ไม่พบ projectId ของโปรเจกต์");
-    if (!data.phaseId) throw new Error("กรุณาเลือก Phase");
 
-    // 1) ✅ สร้าง Task ในระบบ backend (/tasks)
-    await createTask({
-      title: data.name.trim(),
-      description: data.description ?? null,
-      projectId,
-      phaseId: data.phaseId,
-      assignedUserId: null,
-      dueDate: toISOFromDateInput(data.endDate) ?? null,
-      priority: "MEDIUM",
-    });
-
-    // 2) ✅ สร้าง Trello card ต่อ เพื่อให้ UI (board) เห็นทันทีเหมือนเดิม
     const cleanName = stripLeadingTag(data.name, projectTag);
 
-    const created = await createTrelloCard({
+    const createdCard = await createTrelloCard({
       listId: activeListId,
       name: cleanName,
       desc: data.description ?? "",
@@ -261,7 +326,36 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
       projectId,
     });
 
-    setCards((prev) => [created, ...prev]);
+    if (!createdCard?.id) throw new Error("สร้าง Trello Card ไม่สำเร็จ (ไม่พบ cardId)");
+
+    const pickedPhaseId = (data.phaseId ?? "").trim();
+    let createdTaskId: string | undefined;
+
+    if (pickedPhaseId) {
+      const res = await assignTrelloCardToPhase(createdCard.id, pickedPhaseId);
+      createdTaskId = res?.task?.id;
+
+      const p = phases.find((x) => x.id === pickedPhaseId);
+      const phaseName = p?.name ?? "";
+
+      (createdCard as any).phaseId = pickedPhaseId;
+      (createdCard as any).phaseName = phaseName;
+      if (createdTaskId) (createdCard as any).taskId = createdTaskId;
+
+      // ✅ อัปเดต phaseMap ให้ทันที
+      setPhaseMap((prev) => ({
+        ...prev,
+        [createdCard.id]: { phaseId: pickedPhaseId, phaseName },
+      }));
+    } else {
+      (createdCard as any).phaseId = "";
+      (createdCard as any).phaseName = "";
+    }
+
+    // ✅ ใส่เข้า state เพื่อให้ UI ขึ้นทันที
+    setCards((prev) => [createdCard, ...prev]);
+
+    return { id: createdTaskId ?? createdCard.id };
   };
 
   const loading = listsLoader.loading || cardsLoader.loading;
@@ -323,10 +417,11 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     setDragging(false);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch { }
+    } catch {}
   };
 
-  const showOverlay = loading || membersLoader.loading || phasesLoader.loading;
+  const showOverlay =
+    loading || membersLoader.loading || phasesLoader.loading;
 
   return (
     <>

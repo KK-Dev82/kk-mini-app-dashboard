@@ -65,21 +65,47 @@ function diffDays(a: Date, b: Date) {
 
 function addDays(d: Date, days: number) {
   const x = new Date(d);
+  x.setDate(x.getDate() + days); // ✅ ข้ามเดือน/ปีให้เอง (ไม่บั๊ก 28/29/30/31)
+  return x;
+}
+
+function startOfDayLocal(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function addDaysLocal(d: Date, days: number) {
+  const x = startOfDayLocal(d);
   x.setDate(x.getDate() + days);
   return x;
 }
 
+function fmtMonthYearEN(d: Date) {
+  return d.toLocaleDateString("en-US", { month: "short", year: "numeric" }); // Jan 2026
+}
+
+function fmtDayNum(d: Date) {
+  return String(d.getDate()); // 27, 28, 1...
+}
+
+// ✅ FIX: startDate อาจเป็น null → fallback ใช้ dueDate (ให้เป็นงาน 1 วันก็ยังดี)
 function phaseTaskToGanttTask(t: PhaseTaskApi): GanttTaskApi | null {
-  const s = isoToYMD(t.startDate ?? null);
-  const e = isoToYMD(t.dueDate ?? null);
+  const s = isoToYMD((t.startDate ?? t.dueDate) ?? null);
+  const e = isoToYMD((t.dueDate ?? t.startDate) ?? null);
   if (!s || !e) return null;
 
+  // กันกรณีสลับวัน
+  const sd = toDateOnly(s);
+  const ed = toDateOnly(e);
+  const startDate = sd <= ed ? s : e;
+  const endDate = sd <= ed ? e : s;
+
   const idx = typeof t.orderIndex === "number" ? t.orderIndex : 0;
+
   return {
     id: t.id,
     title: (t.title ?? t.name ?? "Task").toString(),
-    startDate: s,
-    endDate: e,
+    startDate,
+    endDate,
     color: TASK_COLORS[Math.abs(idx) % TASK_COLORS.length],
   };
 }
@@ -93,124 +119,177 @@ type DayBar = {
   className: string;
 };
 
+type MonthSegment = { key: string; label: string; start: number; end: number };
+
+function buildMonthSegments(sprintStartDate: Date, sprintDays: number): MonthSegment[] {
+  const segs: MonthSegment[] = [];
+  if (sprintDays <= 0) return segs;
+
+  let segStart = 0;
+  let base = addDaysLocal(sprintStartDate, 0);
+  let curMonth = base.getMonth();
+  let curYear = base.getFullYear();
+
+  for (let i = 0; i < sprintDays; i++) {
+    const d = addDaysLocal(sprintStartDate, i);
+    const m = d.getMonth();
+    const y = d.getFullYear();
+
+    if (m !== curMonth || y !== curYear) {
+      const prevEnd = i - 1;
+      const labelDate = addDaysLocal(sprintStartDate, segStart);
+      segs.push({
+        key: `${curYear}-${curMonth}-${segStart}`,
+        label: fmtMonthYearEN(labelDate),
+        start: segStart,
+        end: prevEnd,
+      });
+
+      segStart = i;
+      curMonth = m;
+      curYear = y;
+    }
+  }
+
+  const labelDate = addDaysLocal(sprintStartDate, segStart);
+  segs.push({
+    key: `${curYear}-${curMonth}-${segStart}`,
+    label: fmtMonthYearEN(labelDate),
+    start: segStart,
+    end: sprintDays - 1,
+  });
+
+  return segs;
+}
+
 /**
- * ✅ Sprint Header แบบ “ไม้บรรทัด” (สวยขึ้น)
- * - baseline เนียนขึ้น
- * - ขีดเล็กทุกวัน + ขีดกลางทุก 2 วัน
- * - ขีดใหญ่วัน 1 / 7 / วันสุดท้าย
- * - เลขอยู่ “บนหัวขีดใหญ่” + ชดเชยซ้ายเล็กน้อยให้ตรงเส้น
+ * ✅ Sprint Header แบบ “วันจริง”
+ * - แถวบน: เดือน (แบ่ง segment อัตโนมัติ)
+ * - แถวล่าง: ไม้บรรทัด + label เป็นเลขวันจริง
  */
-function SprintHeader({
+function SprintHeaderReal({
   leftLabel,
   leftWidth,
+  sprintStartDate,
   sprintDays,
 }: {
   leftLabel: string;
   leftWidth: number;
+  sprintStartDate: Date;
   sprintDays: number;
 }) {
   const denom = Math.max(1, sprintDays - 1);
 
-  const { dayIndexes, majorSet } = useMemo(() => {
-    const dayIndexes = Array.from(
-      { length: Math.max(0, sprintDays) },
-      (_, i) => i
+  const days = useMemo(() => {
+    return Array.from({ length: Math.max(0, sprintDays) }, (_, i) =>
+      addDaysLocal(sprintStartDate, i)
     );
+  }, [sprintStartDate, sprintDays]);
 
-    const majorSet = new Set<number>();
-    if (sprintDays > 0) {
-      majorSet.add(0); // day 1
-      if (sprintDays >= 7) majorSet.add(6); // day 7 (index 6)
-      majorSet.add(sprintDays - 1); // last day
-    }
+  const monthSegments = useMemo(() => {
+    return buildMonthSegments(sprintStartDate, sprintDays);
+  }, [sprintStartDate, sprintDays]);
 
-    return { dayIndexes, majorSet };
-  }, [sprintDays]);
-
-  const labels = useMemo(() => {
-    const items: { dayIndex: number; text: string }[] = [];
-    if (sprintDays >= 1) items.push({ dayIndex: 0, text: "1" });
-    if (sprintDays >= 7) items.push({ dayIndex: 6, text: "7" });
-    if (sprintDays >= 2)
-      items.push({ dayIndex: sprintDays - 1, text: String(sprintDays) });
-
-    const m = new Map<number, string>();
-    items.forEach((x) => m.set(x.dayIndex, x.text));
-    return Array.from(m.entries())
-      .map(([dayIndex, text]) => ({ dayIndex, text }))
-      .sort((a, b) => a.dayIndex - b.dayIndex);
+  // major ticks: วันแรก, วันกลาง(วันที่ 7), วันสุดท้าย (ถ้ามี)
+  const majorSet = useMemo(() => {
+    const s = new Set<number>();
+    if (sprintDays > 0) s.add(0);
+    if (sprintDays >= 7) s.add(6);
+    if (sprintDays > 1) s.add(sprintDays - 1);
+    return s;
   }, [sprintDays]);
 
   return (
     <GanttRowLayout
-      left={
-        <div className="text-xs font-semibold text-slate-500">{leftLabel}</div>
-      }
+      left={<div className="text-xs font-semibold text-slate-500">{leftLabel}</div>}
       right={
-        <div className="relative h-11">
-          {/* baseline */}
-          <div className="absolute left-0 right-0 bottom-[14px] border-t border-slate-200/80" />
-
-          {/* ticks */}
-          <div className="absolute inset-0">
-            {dayIndexes.map((dayIndex) => {
-              const leftPct = (dayIndex / denom) * 100;
-              const isMajor = majorSet.has(dayIndex);
-
-              // minor/medium/major like a real ruler
-              const isMedium = !isMajor && dayIndex % 2 === 0;
-              const tickH = isMajor ? 22 : isMedium ? 14 : 9;
-              const tickW = isMajor ? 2 : 1;
-
-              const tickCls = isMajor
-                ? "bg-slate-700/90"
-                : isMedium
-                ? "bg-slate-400/90"
-                : "bg-slate-300/90";
+        <div className="relative">
+          {/* Month row */}
+          <div className="relative h-6 mb-1">
+            {monthSegments.map((seg) => {
+              const leftPct = (seg.start / denom) * 100;
+              const widthPct =
+                sprintDays <= 1 ? 100 : ((seg.end - seg.start + 1) / sprintDays) * 100;
 
               return (
                 <div
-                  key={`tick-${dayIndex}`}
-                  className="absolute bottom-[14px]"
+                  key={seg.key}
+                  className="absolute top-0 text-xs font-semibold text-slate-500"
                   style={{
                     left: `${leftPct}%`,
-                    transform: "translateX(-50%)",
+                    width: `${widthPct}%`,
                   }}
                 >
-                  <div
-                    className={`rounded-full ${tickCls}`}
-                    style={{ width: `${tickW}px`, height: `${tickH}px` }}
-                  />
-                  {isMajor && (
-                    <div className="mx-auto mt-[3px] h-[2px] w-[10px] rounded-full bg-slate-200/80" />
-                  )}
+                  {seg.label}
                 </div>
               );
             })}
           </div>
 
-          {/* labels */}
-          <div className="absolute inset-0">
-            {labels.map((l) => {
-              const leftPct = (l.dayIndex / denom) * 100;
+          {/* Ruler row */}
+          <div className="relative h-11">
+            <div className="absolute left-0 right-0 bottom-[14px] border-t border-slate-200/80" />
 
-              return (
-                <div
-                  key={`label-${l.dayIndex}`}
-                  className="absolute pointer-events-none"
-                  style={{
-                    left: `${leftPct}%`,
-                    // ✅ ชดเชยไปทางซ้ายอีกนิดให้เลข “ตรงเส้น” (ปรับ LABEL_SHIFT_PX ได้)
-                    transform: `translateX(calc(-50% - ${LABEL_SHIFT_PX}px))`,
-                    bottom: "38px",
-                  }}
-                >
-                  <div className="rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 shadow-[0_1px_0_rgba(0,0,0,0.04)] leading-none whitespace-nowrap">
-                    {l.text}
+            {/* ticks + month separators */}
+            <div className="absolute inset-0">
+              {days.map((d, dayIndex) => {
+                const leftPct = (dayIndex / denom) * 100;
+                const isMajor = majorSet.has(dayIndex);
+                const isMedium = !isMajor && dayIndex % 2 === 0;
+
+                const tickH = isMajor ? 22 : isMedium ? 14 : 9;
+                const tickW = isMajor ? 2 : 1;
+
+                const tickCls = isMajor
+                  ? "bg-slate-700/90"
+                  : isMedium
+                    ? "bg-slate-400/90"
+                    : "bg-slate-300/90";
+
+                // เส้นแบ่งเดือน: ถ้าวันนี้เป็นวันที่ 1 และไม่ใช่วันแรกของ sprint
+                const showMonthDivider = dayIndex !== 0 && d.getDate() === 1;
+
+                return (
+                  <div
+                    key={`tick-${dayIndex}`}
+                    className="absolute bottom-[14px]"
+                    style={{
+                      left: `${leftPct}%`,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    {showMonthDivider && (
+                      <div className="absolute -bottom-[14px] left-1/2 h-[32px] w-[1px] -translate-x-1/2 bg-slate-200" />
+                    )}
+
+                    <div
+                      className={`rounded-full ${tickCls}`}
+                      style={{ width: `${tickW}px`, height: `${tickH}px` }}
+                    />
+
+                    {isMajor && (
+                      <div className="mx-auto mt-[3px] h-[2px] w-[10px] rounded-full bg-slate-200/80" />
+                    )}
+
+                    {/* labels: โชว์เลข “วันจริง” เฉพาะ major */}
+                    {isMajor && (
+                      <div
+                        className="absolute pointer-events-none"
+                        style={{
+                          left: "50%",
+                          transform: `translateX(calc(-50% - ${LABEL_SHIFT_PX}px))`,
+                          bottom: "38px",
+                        }}
+                      >
+                        <div className="rounded-md bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600 shadow-[0_1px_0_rgba(0,0,0,0.04)] leading-none whitespace-nowrap">
+                          {fmtDayNum(d)}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       }
@@ -305,14 +384,25 @@ export default function PhaseTasksModal({
   const [phase, setPhase] = useState<ProjectPhaseDetailApi | null>(null);
   const reqRef = useRef(0);
 
+  // ✅ backend คำนวณ tasks ตาม sprint ให้แล้ว → เปลี่ยน sprintIndex แล้ว refetch
+  const [sprintIndex, setSprintIndex] = useState(0);
+
+  const TASKS_LIMIT_PER_SPRINT = 50;
+
   useEffect(() => {
     if (!open) return;
+    if (!projectId || !phaseId) return;
 
     const seq = ++reqRef.current;
     setLoading(true);
     setPhase(null);
 
-    fetchProjectPhaseById(projectId, phaseId)
+    fetchProjectPhaseById(
+      projectId,
+      phaseId,
+      sprintIndex + 1, // swagger: sprint เริ่มที่ 1
+      TASKS_LIMIT_PER_SPRINT
+    )
       .then((res) => {
         if (seq !== reqRef.current) return;
         setPhase(res);
@@ -320,7 +410,7 @@ export default function PhaseTasksModal({
       .finally(() => {
         if (seq === reqRef.current) setLoading(false);
       });
-  }, [open, projectId, phaseId]);
+  }, [open, projectId, phaseId, sprintIndex]);
 
   const phaseRange = useMemo(() => {
     const sYMD = isoToYMD(phase?.startDate ?? null);
@@ -342,8 +432,6 @@ export default function PhaseTasksModal({
     return Math.max(1, Math.ceil(phaseRange.totalDays / SPRINT_DAYS));
   }, [phaseRange]);
 
-  const [sprintIndex, setSprintIndex] = useState(0);
-
   useEffect(() => {
     if (!open) return;
     setSprintIndex(0);
@@ -358,7 +446,10 @@ export default function PhaseTasksModal({
     if (!phaseRange) return null;
 
     const startDay = sprintIndex * SPRINT_DAYS;
-    const endDay = Math.min(phaseRange.totalDays - 1, startDay + SPRINT_DAYS - 1);
+    const endDay = Math.min(
+      phaseRange.totalDays - 1,
+      startDay + SPRINT_DAYS - 1
+    );
 
     const startDate = addDays(phaseRange.start, startDay);
     const endDate = addDays(phaseRange.start, endDay);
@@ -371,6 +462,7 @@ export default function PhaseTasksModal({
       startDay,
       endDay,
       sprintDays,
+      startDate, // ✅ เก็บ Date จริงไว้ใช้ทำหัวไม้บรรทัด
       startYMD: isoToYMD(startDate.toISOString())!,
       endYMD: isoToYMD(endDate.toISOString())!,
     };
@@ -379,41 +471,35 @@ export default function PhaseTasksModal({
   const taskRows = useMemo(() => {
     if (!phase?.tasks || !phaseRange || !sprintRange) return [];
 
+    const sprintStartDate = addDays(phaseRange.start, sprintRange.startDay);
+
     return phase.tasks
-      .map((t) => phaseTaskToGanttTask(t))
-      .filter((x): x is GanttTaskApi => Boolean(x))
-      .map((t) => {
-        const s = toDateOnly(t.startDate);
-        const e = toDateOnly(t.endDate);
+      .map((t, i) => ({ raw: t, idx: i }))
+      .map(({ raw, idx }) => {
+        const gt = phaseTaskToGanttTask(raw);
+        if (!gt) return null;
 
-        const taskStart = clampNum(
-          diffDays(s, phaseRange.start),
-          0,
-          phaseRange.totalDays - 1
-        );
-        const taskEnd = clampNum(
-          diffDays(e, phaseRange.start),
-          0,
-          phaseRange.totalDays - 1
-        );
+        const s = toDateOnly(gt.startDate);
+        const e = toDateOnly(gt.endDate);
+        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return null;
 
-        const ovStart = Math.max(taskStart, sprintRange.startDay);
-        const ovEnd = Math.min(taskEnd, sprintRange.endDay);
-        if (ovEnd < ovStart) return null;
+        const startDay = diffDays(s, sprintStartDate);
+        const endDay = diffDays(e, sprintStartDate);
 
-        const idx = phase.tasks.findIndex((pt) => pt.id === t.id);
-        const color = TASK_COLORS[Math.abs(idx) % TASK_COLORS.length];
+        const clampedStart = clampNum(startDay, 0, sprintRange.sprintDays - 1);
+        const clampedEnd = clampNum(endDay, 0, sprintRange.sprintDays - 1);
+
+        const order = typeof raw.orderIndex === "number" ? raw.orderIndex : idx;
+        const color = TASK_COLORS[Math.abs(order) % TASK_COLORS.length];
 
         return {
-          key: `${t.id}-s${sprintRange.sprintIndex}`,
-          id: t.id,
-          title: t.title,
-          startDate: t.startDate,
-          endDate: t.endDate,
-          startDay: ovStart - sprintRange.startDay,
-          endDay: ovEnd - sprintRange.startDay,
-          cutLeft: taskStart < sprintRange.startDay,
-          cutRight: taskEnd > sprintRange.endDay,
+          key: `${gt.id}-s${sprintRange.sprintIndex}`,
+          id: gt.id,
+          title: gt.title,
+          startDate: gt.startDate,
+          endDate: gt.endDate,
+          startDay: clampedStart,
+          endDay: Math.max(clampedStart, clampedEnd),
           colorClass: COLOR_MAP[color],
         };
       })
@@ -438,7 +524,7 @@ export default function PhaseTasksModal({
     >
       <div className="h-full overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -477,104 +563,100 @@ export default function PhaseTasksModal({
             </div>
           </div>
 
-          {/* ไม่แสดง X ซ้ำ */}
           <div className="h-10 w-10" />
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-auto">
-          <div className="px-6 py-5">
-            <div className="mb-3 text-sm font-semibold text-slate-900">Tasks</div>
+        {/* Top Bar (Title + Sprint Ruler) คงที่ */}
+        <div className="shrink-0 bg-white px-6 pt-5">
+          <div className="mb-3 text-sm font-semibold text-slate-900">Tasks</div>
 
-            {phaseRange && sprintRange ? (
-              <SprintHeader
-                leftLabel="Task"
-                leftWidth={TASK_LEFT_WIDTH}
-                sprintDays={sprintRange.sprintDays}
-              />
-            ) : (
-              <div className="text-xs text-slate-500">ยังไม่กำหนดช่วง Phase</div>
-            )}
+          {phaseRange && sprintRange ? (
+            <SprintHeaderReal
+              leftLabel="Task"
+              leftWidth={TASK_LEFT_WIDTH}
+              sprintStartDate={startOfDayLocal(sprintRange.startDate)} // ✅ วันจริงเริ่มของ sprint
+              sprintDays={sprintRange.sprintDays}
+            />
+          ) : (
+            <div className="text-xs text-slate-500">ยังไม่กำหนดช่วง Phase</div>
+          )}
 
-            <div className="mt-3 border-t border-slate-200" />
-
-            <div className="mt-4 space-y-4">
-              {loading && (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="text-sm font-semibold text-slate-700">
-                    กำลังโหลด tasks
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">โปรดรอสักครู่...</div>
-                </div>
-              )}
-
-              {!loading && (!phaseRange || !sprintRange) && (
-                <div className="text-sm text-slate-400">ยังไม่มีช่วง Phase</div>
-              )}
-
-              {!loading && phaseRange && sprintRange && taskRows.length === 0 && (
-                <div className="text-sm text-slate-400">Sprint นี้ไม่มี Task</div>
-              )}
-
-              {!loading &&
-                phaseRange &&
-                sprintRange &&
-                taskRows.map((t) => {
-                  const bars: DayBar[] = [
-                    {
-                      id: t.key,
-                      title: t.title,
-                      startDay: t.startDay,
-                      endDay: t.endDay,
-                      className: t.colorClass,
-                    },
-                  ];
-
-                  return (
-                    <div
-                      key={t.key}
-                      className="rounded-2xl border border-slate-200 bg-white p-4"
-                    >
-                      <GanttRowLayout
-                        left={
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="truncate text-sm font-semibold text-slate-900">
-                                {t.title}
-                              </div>
-                              {(t.cutLeft || t.cutRight) && (
-                                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                                  ต่อเนื่อง
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {fmtThaiDate(t.startDate)} – {fmtThaiDate(t.endDate)}
-                            </div>
-                          </div>
-                        }
-                        right={
-                          <SprintTimeline
-                            bars={bars}
-                            sprintDays={sprintRange.sprintDays}
-                            height={52}
-                            barHeight={40}
-                          />
-                        }
-                        leftWidth={TASK_LEFT_WIDTH}
-                      />
-                    </div>
-                  );
-                })}
-            </div>
-
-            <div className="h-6" />
-          </div>
+          <div className="mt-3 border-t border-slate-200" />
         </div>
 
-        {/* Footer: เปลี่ยน Sprint อยู่ล่าง */}
+        {/* Scroll เฉพาะรายการ Task */}
+        <div className="flex-1 overflow-auto px-6 py-4">
+          <div className="space-y-4">
+            {loading && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-700">
+                  กำลังโหลด tasks
+                </div>
+                <div className="mt-1 text-xs text-slate-500">โปรดรอสักครู่...</div>
+              </div>
+            )}
+
+            {!loading && (!phaseRange || !sprintRange) && (
+              <div className="text-sm text-slate-400">ยังไม่มีช่วง Phase</div>
+            )}
+
+            {!loading && phaseRange && sprintRange && taskRows.length === 0 && (
+              <div className="text-sm text-slate-400">Sprint นี้ไม่มี Task</div>
+            )}
+
+            {!loading &&
+              phaseRange &&
+              sprintRange &&
+              taskRows.map((t) => {
+                const bars: DayBar[] = [
+                  {
+                    id: t.key,
+                    title: t.title,
+                    startDay: t.startDay,
+                    endDay: t.endDay,
+                    className: t.colorClass,
+                  },
+                ];
+
+                return (
+                  <div
+                    key={t.key}
+                    className="rounded-2xl border border-slate-200 bg-white p-4"
+                  >
+                    <GanttRowLayout
+                      left={
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">
+                              {t.title}
+                            </div>
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {fmtThaiDate(t.startDate)} – {fmtThaiDate(t.endDate)}
+                          </div>
+                        </div>
+                      }
+                      right={
+                        <SprintTimeline
+                          bars={bars}
+                          sprintDays={sprintRange.sprintDays}
+                          height={52}
+                          barHeight={40}
+                        />
+                      }
+                      leftWidth={TASK_LEFT_WIDTH}
+                    />
+                  </div>
+                );
+              })}
+          </div>
+
+          <div className="h-4" />
+        </div>
+
+        {/* Footer: เปลี่ยน Sprint อยู่ล่าง (คงที่) */}
         {phaseRange && sprintRange && (
-          <div className="border-t border-slate-100 bg-white px-6 py-4">
+          <div className="shrink-0 border-t border-slate-100 bg-white px-6 py-4">
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -594,7 +676,9 @@ export default function PhaseTasksModal({
 
               <button
                 type="button"
-                onClick={() => setSprintIndex((i) => Math.min(sprintCount - 1, i + 1))}
+                onClick={() =>
+                  setSprintIndex((i) => Math.min(sprintCount - 1, i + 1))
+                }
                 disabled={!canNext}
                 className={[
                   "inline-flex h-10 w-10 items-center justify-center rounded-2xl border bg-white",
