@@ -20,7 +20,7 @@ import {
 } from "../../../lib/ganttService";
 
 import type { GanttProjectWithTasks } from "../../component/ganttchart/ganttTypes";
-import ProjectGanttModal from "./ProjectGanttModal";
+import ProjectGanttModal from "./gantt/ProjectGanttModal";
 
 import GanttTimeline, {
   type GanttTimelineBar,

@@ -1,65 +1,22 @@
-// ProjectGanttModal.tsx
+// home/components/gantt/ProjectGanttModal.tsx
 "use client";
 
 import { useMemo, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 
-import type { GanttTaskApi, GanttTaskColor } from "../../../lib/ganttService";
-import type { GanttProjectWithTasks } from "../../component/ganttchart/ganttTypes";
+import type { GanttTaskApi } from "../../../../lib/ganttService";
+import type { GanttProjectWithTasks } from "../../../component/ganttchart/ganttTypes";
 
-import { clamp, fmtThaiDate, monthIndex, toDateOnly } from "../../component/ganttchart/ganttUtils";
+import { fmtThaiDate } from "../../../component/ganttchart/ganttUtils";
 
-import GanttMonthHeader from "../../component/ganttchart/GanttMonthHeader";
-import GanttTimeline, { type GanttTimelineBar } from "../../component/ganttchart/GanttTimeline";
-import GanttRowLayout from "../../component/ganttchart/GanttRowLayout";
+import GanttMonthHeader from "../../../component/ganttchart/GanttMonthHeader";
+import GanttTimeline, { type GanttTimelineBar } from "../../../component/ganttchart/GanttTimeline";
+import GanttRowLayout from "../../../component/ganttchart/GanttRowLayout";
 
 import PhaseTasksModal from "./PhaseTasksModal";
 
-const COLOR_MAP: Record<GanttTaskColor, string> = {
-  green: "bg-emerald-500",
-  blue: "bg-blue-500",
-  red: "bg-rose-500",
-  orange: "bg-amber-500",
-  purple: "bg-fuchsia-500",
-  slate: "bg-slate-700",
-  pink: "bg-pink-500",
-};
-
-type TaskBar = {
-  id: string; // phaseId
-  title: string; // phaseTitle
-  startM: number;
-  endM: number;
-  colorClass: string;
-  startDate: string;
-  endDate: string;
-};
-
-function mapTaskToBar(t: GanttTaskApi, year: number): TaskBar | null {
-  const yearStart = new Date(year, 0, 1);
-  const yearEnd = new Date(year, 11, 31);
-
-  const s = toDateOnly(t.startDate);
-  const e = toDateOnly(t.endDate);
-
-  if (e < yearStart || s > yearEnd) return null;
-
-  const sClamped = s < yearStart ? yearStart : s;
-  const eClamped = e > yearEnd ? yearEnd : e;
-
-  const startM = clamp(monthIndex(sClamped), 0, 11);
-  const endM = clamp(monthIndex(eClamped), 0, 11);
-
-  return {
-    id: t.id,
-    title: t.title,
-    startM,
-    endM,
-    colorClass: COLOR_MAP[t.color],
-    startDate: t.startDate,
-    endDate: t.endDate,
-  };
-}
+// ✅ NEW: mapping utils
+import { mapTaskToBar, type TaskBar } from "./_internal/projectGanttMap";
 
 type Stage = "phases" | "tasks";
 
@@ -79,7 +36,7 @@ export default function ProjectGanttModal({
   const phaseRows = useMemo(() => {
     if (!project) return [];
     return (project.tasks ?? [])
-      .map((t) => mapTaskToBar(t, year))
+      .map((t: GanttTaskApi) => mapTaskToBar(t, year))
       .filter((x): x is TaskBar => Boolean(x));
   }, [project, year]);
 
@@ -96,12 +53,9 @@ export default function ProjectGanttModal({
 
   const backToPhases = () => {
     setStage("phases");
-    // จะ clear เลยก็ได้ แต่แนะนำคงไว้เพื่อให้สไลด์กลับเร็วและไม่กระพริบ
-    // setActivePhase(null);
   };
 
   const closeAll = () => {
-    // reset state ให้กลับมาเริ่มที่ phases ทุกครั้ง
     setStage("phases");
     setActivePhase(null);
     onClose();
@@ -114,7 +68,7 @@ export default function ProjectGanttModal({
 
       <div className="absolute inset-x-0 top-10 mx-auto w-[min(1400px,calc(100%-24px))]">
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
-          {/* Header (คงเดิม) */}
+          {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -139,18 +93,15 @@ export default function ProjectGanttModal({
             </button>
           </div>
 
-          {/* ✅ Body = container ของ slide pages */}
+          {/* Body = container ของ slide pages */}
           <div className="relative">
-            {/* slide track */}
             <div
               className={[
                 "flex w-[200%] transition-transform duration-200 ease-out",
                 stage === "tasks" ? "-translate-x-1/2" : "translate-x-0",
               ].join(" ")}
             >
-              {/* =========================
-                  PAGE 1: PHASES (ซ้าย)
-                 ========================= */}
+              {/* PAGE 1: PHASES */}
               <div className="w-1/2 px-6 py-5">
                 <div className="mb-3 flex items-center justify-between">
                   <div className="text-sm font-semibold text-slate-900">Phases</div>
@@ -182,7 +133,6 @@ export default function ProjectGanttModal({
                           endM: t.endM,
                           className: t.colorClass,
                           lane: 0,
-                          // คลิกแท่งก็ไปหน้า tasks
                           onClick: () => openPhaseTasks(t.id, t.title),
                         },
                       ];
@@ -211,12 +161,8 @@ export default function ProjectGanttModal({
                 </div>
               </div>
 
-              {/* =========================
-                  PAGE 2: TASKS (ขวา)
-                  ใช้ PhaseTasksModal แบบ "panel" (absolute inset-0)
-                 ========================= */}
+              {/* PAGE 2: TASKS */}
               <div className="w-1/2 relative">
-                {/* ทำพื้นที่ให้ panel ทับได้ */}
                 <div className="relative h-full min-h-[520px]">
                   <PhaseTasksModal
                     open={stage === "tasks"}
