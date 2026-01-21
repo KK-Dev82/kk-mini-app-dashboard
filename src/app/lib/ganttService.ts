@@ -48,15 +48,13 @@ export type ProjectPhaseApi = {
   description?: string | null;
   orderIndex?: number | null;
   status?: string | null;
-  startDate: string | null; // ISO
-  dueDate: string | null; // ISO
+  startDate: string | null;
+  dueDate: string | null;
   deliverDate?: string | null;
   trelloListId?: string | null;
   createdAt?: string;
   updatedAt?: string;
   projectId: string;
-
-  // ✅ แก้จาก unknown[] -> typed (มี trelloCardId)
   tasks?: ProjectPhaseTaskApi[];
 };
 
@@ -73,10 +71,10 @@ export async function fetchProjectPhases(
 export type CreateProjectPhasePayload = {
   name: string;
   description?: string | null;
-  orderIndex: number; // ✅ required (backend บังคับ int)
-  status?: string | null; // e.g. "NOT_STARTED"
-  startDate?: string | null; // ISO
-  dueDate?: string | null; // ISO
+  orderIndex: number;
+  status?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
   deliverDate?: string | null;
   trelloListId?: string | null;
 };

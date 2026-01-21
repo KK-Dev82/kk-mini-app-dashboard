@@ -73,6 +73,17 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
 
   // ✅ map: cardId -> {phaseId, phaseName}
   const [phaseMap, setPhaseMap] = useState<PhaseMap>({});
+  // ✅ สำคัญ: เก็บ "ค่าล่าสุด" กัน phase เด้งกลับตอน onReload()
+  const phaseMapRef = useRef<PhaseMap>({});
+
+  // ✅ helper setter ให้ ref อัปเดตทันที (ไม่ต้องรอ useEffect)
+  const setPhaseMapSafe = (updater: (prev: PhaseMap) => PhaseMap) => {
+    setPhaseMap((prev) => {
+      const next = updater(prev);
+      phaseMapRef.current = next;
+      return next;
+    });
+  };
 
   // create modal
   const [open, setOpen] = useState(false);
@@ -116,11 +127,12 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   };
 
   // ✅ reload cards (แทน F5)
+  // ✅ ใช้ phaseMapRef.current เสมอ เพื่อไม่เด้งกลับค่าเก่า
   const reloadCards = async () => {
     const data = await fetchTrelloCardsByTag(projectTag);
     const next = (data ?? []).filter((c) => !c.closed);
 
-    const withPhase = applyPhaseToCards(next, phaseMap);
+    const withPhase = applyPhaseToCards(next, phaseMapRef.current);
     setCards(withPhase);
 
     // ✅ sync activeCard ถ้ากำลังเปิดอยู่
@@ -130,17 +142,57 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     });
   };
 
+  // ✅ onUpdated จาก TaskDetailModal จะส่ง phaseId/phaseName ใหม่มาด้วย
+  // ทำให้เราต้องอัปเดต phaseMap (และ ref) ทันที ก่อนจะ onReload()
   const handleCardUpdated = (updated: TrelloCard) => {
     if (!updated?.id) return;
 
-    const hit = phaseMap[updated.id];
+    const uAny = updated as any;
+
+    // เช็คว่ามี field phaseId/phaseName ถูกส่งมาหรือไม่
+    const hasPhaseField =
+      Object.prototype.hasOwnProperty.call(uAny, "phaseId") ||
+      Object.prototype.hasOwnProperty.call(uAny, "phaseName");
+
+    const incomingPhaseId = String(uAny.phaseId ?? "").trim();
+    const incomingPhaseName = String(uAny.phaseName ?? "").trim();
+
+    if (hasPhaseField) {
+      // ✅ update map ก่อน (สำคัญมาก กัน reload ไปใช้ค่าเก่า)
+      setPhaseMapSafe((prev) => {
+        const next = { ...prev };
+
+        // ถ้า phaseId ว่าง = remove
+        if (!incomingPhaseId) {
+          delete next[updated.id];
+        } else {
+          next[updated.id] = {
+            phaseId: incomingPhaseId,
+            phaseName: incomingPhaseName,
+          };
+        }
+        return next;
+      });
+    }
+
+    // ✅ patch การ์ดให้มี phase ที่ถูกต้องเสมอ (ไม่พึ่ง phaseMap state ที่อาจ stale)
+    const hit = hasPhaseField
+      ? incomingPhaseId
+        ? { phaseId: incomingPhaseId, phaseName: incomingPhaseName }
+        : null
+      : phaseMapRef.current[updated.id];
+
     const patched = hit
       ? ({
           ...(updated as any),
           phaseId: hit.phaseId,
           phaseName: hit.phaseName,
         } as any as TrelloCard)
-      : updated;
+      : ({
+          ...(updated as any),
+          phaseId: "",
+          phaseName: "",
+        } as any as TrelloCard);
 
     setCards((prev) => prev.map((c) => (c.id === patched.id ? patched : c)));
     setActiveCard((prev) => (prev?.id === patched.id ? patched : prev));
@@ -177,7 +229,9 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         if (cancelled) return;
 
         const base = (data ?? []).filter((c) => !c.closed);
-        setCards(applyPhaseToCards(base, phaseMap));
+
+        // ✅ ใช้ ref (เพื่อกัน race ตอน phaseMap ถูกอัปเดตในช่วงเดียวกัน)
+        setCards(applyPhaseToCards(base, phaseMapRef.current));
       })
       .catch((e) => console.error("Failed to load trello cards by tag", e));
 
@@ -210,7 +264,11 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
   useEffect(() => {
     if (!projectId) {
       setPhases([]);
+
+      // ✅ เคลียร์ map + ref
+      phaseMapRef.current = {};
       setPhaseMap({});
+
       // optional: เคลียร์การแปะ phase ออกจาก cards
       setCards((prev) => applyPhaseToCards(prev, {}));
       setActiveCard((prev) => prev);
@@ -233,7 +291,6 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
         const map: PhaseMap = {};
         for (const ph of next) {
           for (const t of ph.tasks ?? []) {
-            // ต้องมี trelloCardId
             const cardId = ((t as any).trelloCardId ?? "").trim();
             if (!cardId) continue;
 
@@ -244,6 +301,8 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
           }
         }
 
+        // ✅ set ทั้ง state + ref
+        phaseMapRef.current = map;
         setPhaseMap(map);
 
         // ✅ แปะให้ cards ที่โหลดไว้แล้ว
@@ -254,7 +313,11 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
           if (!prev?.id) return prev;
           const hit = map[prev.id];
           if (!hit) return prev;
-          return { ...(prev as any), phaseId: hit.phaseId, phaseName: hit.phaseName } as any;
+          return {
+            ...(prev as any),
+            phaseId: hit.phaseId,
+            phaseName: hit.phaseName,
+          } as any;
         });
       })
       .catch((e) => console.error("Failed to load phases", e));
@@ -342,8 +405,8 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
       (createdCard as any).phaseName = phaseName;
       if (createdTaskId) (createdCard as any).taskId = createdTaskId;
 
-      // ✅ อัปเดต phaseMap ให้ทันที
-      setPhaseMap((prev) => ({
+      // ✅ อัปเดต phaseMap + ref ให้ทันที
+      setPhaseMapSafe((prev) => ({
         ...prev,
         [createdCard.id]: { phaseId: pickedPhaseId, phaseName },
       }));
@@ -420,8 +483,7 @@ export default function TaskStatsSummary({ projectTag, projectId }: Props) {
     } catch {}
   };
 
-  const showOverlay =
-    loading || membersLoader.loading || phasesLoader.loading;
+  const showOverlay = loading || membersLoader.loading || phasesLoader.loading;
 
   return (
     <>

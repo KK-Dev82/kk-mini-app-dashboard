@@ -5,6 +5,7 @@ import {
   UserGroupIcon,
   CalendarDaysIcon,
   CheckCircleIcon,
+  RectangleStackIcon,
 } from "@heroicons/react/24/outline";
 import type { TrelloCard } from "../../../../lib/trelloService";
 
@@ -95,6 +96,12 @@ export default function TaskCard({
 
   const p = progressPercent(card);
 
+  // ✅ Phase ที่เราแปะเข้ามาจาก TaskStatsSummary (phaseMap)
+  const phaseName = useMemo(() => {
+    const n = ((card as any).phaseName as string | undefined) ?? "";
+    return n.trim();
+  }, [card]);
+
   return (
     <button
       type="button"
@@ -109,6 +116,14 @@ export default function TaskCard({
       <div className="text-sm font-medium leading-snug">{card.name}</div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-white/70">
+        {/* ✅ Phase badge */}
+        <span className="inline-flex max-w-[260px] items-center gap-1 rounded-full bg-indigo-400/20 px-2 py-0.5 text-indigo-100 ring-1 ring-indigo-300/20">
+          <RectangleStackIcon className="h-4 w-4 shrink-0" />
+          <span className="truncate">
+            {phaseName ? phaseName : "(ไม่อยู่ใน Phase)"}
+          </span>
+        </span>
+
         {/* ✅ progress bar + % */}
         {p && (
           <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-2 py-1">

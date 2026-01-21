@@ -13,7 +13,7 @@ import {
   unassignTrelloMember,
   updateChecklistItemState,
   type ChecklistItemState,
-  assignTrelloCardToPhase, // ✅ ใช้เส้นนี้
+  assignTrelloCardToPhase,
 } from "../../../../lib/trelloService";
 
 import AppDatePicker from "../../../component/datepicker/AppDatePicker";
@@ -59,17 +59,9 @@ function is404UnassignError(e: unknown) {
   );
 }
 
-/**
- * ✅ ลบ tag ที่ backend ใส่มาใน desc เช่น:
- * [PHASE:Phase 2 - Developer]
- * - รองรับหลายบรรทัด/หลายอัน
- * - ลบเฉพาะ tag นี้ ไม่ยุ่งอย่างอื่น
- */
 function stripPhaseTag(desc?: string | null) {
   if (!desc) return "";
-  return desc
-    .replace(/\[PHASE:[^\]]+\]\s*/gi, "") // remove "[PHASE:...]" + spaces/newlines after
-    .trim();
+  return desc.replace(/\[PHASE:[^\]]+\]\s*/gi, "").trim();
 }
 
 export default function TaskDetailModal({
@@ -130,6 +122,12 @@ export default function TaskDetailModal({
     phaseId: "",
   });
 
+  const phaseNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of phases ?? []) m.set(p.id, p.name);
+    return m;
+  }, [phases]);
+
   useEffect(() => {
     if (!card) return;
 
@@ -138,12 +136,11 @@ export default function TaskDetailModal({
     setSaving(false);
     setCheckingId("");
 
-    const initialPhaseId = ((card as any).phaseId as string | undefined) ?? "";
+    const initialPhaseId = String(((card as any).phaseId as string | undefined) ?? "").trim();
 
     setForm({
       listId: (card as any).idList ?? "",
       name: card.name ?? "",
-      // ✅ ตัด [PHASE:...] ออกตอนเอามาใส่ฟอร์มด้วย (เพื่อไม่ให้เห็นใน textarea)
       desc: stripPhaseTag(card.desc ?? ""),
       startDate: card.start ? new Date(card.start) : null,
       dueDate: card.due ? new Date(card.due) : null,
@@ -152,6 +149,29 @@ export default function TaskDetailModal({
     });
   }, [card?.id]);
 
+  // ✅ ต้องอยู่ "ก่อน" early return เสมอ (แก้ Hook order warning)
+  const cardPhaseId = useMemo(() => {
+    return String(((card as any)?.phaseId as string | undefined) ?? "").trim();
+  }, [card]);
+
+  const cardPhaseName = useMemo(() => {
+    return String(((card as any)?.phaseName as string | undefined) ?? "").trim();
+  }, [card]);
+
+  const displayPhaseName = useMemo(() => {
+    // กัน card เป็น null ตอน modal ปิด (แต่ hook ต้องถูกเรียกเสมอ)
+    if (!card) return "";
+
+    if (editing) {
+      const id = (form.phaseId ?? "").trim();
+      return id ? phaseNameMap.get(id) ?? "" : "";
+    }
+    if (cardPhaseName) return cardPhaseName;
+    if (cardPhaseId) return phaseNameMap.get(cardPhaseId) ?? "";
+    return "";
+  }, [card, editing, form.phaseId, phaseNameMap, cardPhaseId, cardPhaseName]);
+
+  // ✅ early return หลัง hook ทั้งหมด
   if (!open || !card) return null;
 
   const canSave = form.listId.trim() && form.name.trim();
@@ -213,7 +233,6 @@ export default function TaskDetailModal({
 
       setSaving(true);
 
-      // ✅ กันเผลอ save tag กลับเข้าไป (แม้จะหลุดมาในอนาคต)
       const cleanDesc = stripPhaseTag(form.desc ?? "");
 
       // 1) update trello card details
@@ -244,24 +263,28 @@ export default function TaskDetailModal({
         }
       }
 
-      // 3) ✅ sync phase ด้วย cardId ตาม API Guide
+      // 3) sync phase
       let createdTaskId: string | undefined;
 
-      if (form.phaseId.trim()) {
-        const res = await assignTrelloCardToPhase(card.id, form.phaseId.trim());
+      const nextPhaseId = (form.phaseId ?? "").trim();
+      const nextPhaseName = nextPhaseId ? phaseNameMap.get(nextPhaseId) ?? "" : "";
+
+      if (nextPhaseId) {
+        const res = await assignTrelloCardToPhase(card.id, nextPhaseId);
         createdTaskId = res?.task?.id;
-      } else {
-        // backend ยังไม่มี remove ชัดเจน ก็ไม่ทำอะไร
       }
 
-      // 4) optimistic patch
+      // 4) optimistic patch (สำคัญ: ใส่ phaseName ด้วย)
       onUpdated({
         ...card,
         ...updated,
         idMembers: uniq(form.memberIds ?? []),
 
         ...(createdTaskId ? { taskId: createdTaskId } : {}),
-        ...(form.phaseId ? { phaseId: form.phaseId } : { phaseId: "" }),
+
+        ...(nextPhaseId
+          ? { phaseId: nextPhaseId, phaseName: nextPhaseName }
+          : { phaseId: "", phaseName: "" }),
       } as any);
 
       // 5) refetch
@@ -276,12 +299,11 @@ export default function TaskDetailModal({
     }
   };
 
-  const shownDesc = stripPhaseTag(card.desc); // ✅ ใช้ตอนโชว์อย่างเดียว
+  const shownDesc = stripPhaseTag(card.desc);
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-5xl rounded-2xl bg-slate-900 text-white shadow-2xl ring-1 ring-white/10">
-        {/* header */}
         <div className="flex items-start justify-between border-b border-white/10 px-6 py-5">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -299,6 +321,9 @@ export default function TaskDetailModal({
                   {lb.name || lb.color || "label"}
                 </span>
               ))}
+              <span className="rounded-full bg-indigo-400/20 px-3 py-1 text-xs text-indigo-100 ring-1 ring-indigo-300/20">
+                Phase: {displayPhaseName ? displayPhaseName : "(ไม่อยู่ใน Phase)"}
+              </span>
             </div>
 
             {!editing ? (
@@ -328,11 +353,8 @@ export default function TaskDetailModal({
           </button>
         </div>
 
-        {/* body */}
         <div className="grid grid-cols-1 gap-6 px-6 py-6 md:grid-cols-[1fr_320px]">
-          {/* left */}
           <div className="space-y-6">
-            {/* members */}
             <section className="space-y-2">
               <div className="text-sm font-semibold text-white/90">สมาชิก</div>
               {selectedMembers.length === 0 ? (
@@ -356,7 +378,6 @@ export default function TaskDetailModal({
               )}
             </section>
 
-            {/* desc */}
             <section className="space-y-2">
               <div className="text-sm font-semibold text-white/90">คำอธิบาย</div>
               {!editing ? (
@@ -375,7 +396,6 @@ export default function TaskDetailModal({
               )}
             </section>
 
-            {/* checklist */}
             <section className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold text-white/90">
@@ -507,7 +527,9 @@ export default function TaskDetailModal({
                       <div className="text-xs text-white/60">คอลัมน์ (List)</div>
                       <select
                         value={form.listId}
-                        onChange={(e) => setForm((p) => ({ ...p, listId: e.target.value }))}
+                        onChange={(e) =>
+                          setForm((p) => ({ ...p, listId: e.target.value }))
+                        }
                         className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
                         disabled={saving}
                       >
