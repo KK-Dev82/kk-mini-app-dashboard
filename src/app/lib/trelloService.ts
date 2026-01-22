@@ -81,6 +81,12 @@ function mustId(v: string, label: string) {
 
 export const fetchTrelloMembers = () => apiGet<TrelloMember[]>("/trello/members");
 
+/**
+ * ✅ NEW: ดึงการ์ดทั้งหมดจาก default board
+ * GET /trello/cards
+ */
+export const fetchTrelloCards = () => apiGet<TrelloCard[]>("/trello/cards");
+
 export async function fetchTrelloCardsByTag(tag: string): Promise<TrelloCard[]> {
   const t = (tag ?? "").trim();
   if (!t) return [];
@@ -88,10 +94,12 @@ export async function fetchTrelloCardsByTag(tag: string): Promise<TrelloCard[]> 
 }
 
 /**
- * ✅ NEW: ดึงการ์ดที่อยู่ใน Phase นั้น ๆ
+ * ✅ ดึงการ์ดที่อยู่ใน Phase นั้น ๆ
  * GET /trello/phases/{phaseId}/cards
  */
-export async function fetchTrelloCardsByPhase(phaseId: string): Promise<TrelloCard[]> {
+export async function fetchTrelloCardsByPhase(
+  phaseId: string
+): Promise<TrelloCard[]> {
   const pid = mustId(phaseId, "phaseId");
   return apiGet<TrelloCard[]>(
     `/trello/phases/${encodeURIComponent(pid)}/cards`
@@ -169,7 +177,9 @@ export async function updateChecklistItemState(
   }
 
   return apiPut<any>(
-    `/trello/cards/${encodeURIComponent(cid)}/checklist/${encodeURIComponent(iid)}`,
+    `/trello/cards/${encodeURIComponent(cid)}/checklist/${encodeURIComponent(
+      iid
+    )}`,
     { state }
   );
 }
