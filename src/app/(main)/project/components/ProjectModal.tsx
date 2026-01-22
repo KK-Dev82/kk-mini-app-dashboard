@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { XMarkIcon } from "@heroicons/react/24/outline";
+import {
+  XMarkIcon,
+  TrashIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+} from "@heroicons/react/24/outline";
 import AppDatePicker from "../../component/datepicker/AppDatePicker";
 
 import type { ProjectApi, ProjectStatus } from "../../../lib/projectService";
@@ -19,8 +24,11 @@ import { fetchUsers, type UserApi } from "../../../lib/userService";
 import {
   fetchProjectPhases,
   createProjectPhase,
+  deleteProjectPhase,
+  reorderProjectPhases,
   type ProjectPhaseApi,
   type CreateProjectPhasePayload,
+  type ReorderProjectPhasesPayload,
 } from "../../../lib/ganttService";
 
 export type NewProjectPayload = {
@@ -37,7 +45,6 @@ type Props = {
   open: boolean;
   onClose: () => void;
 
-  // ✅ return ProjectApi เพื่อเอา id ไป add members ต่อ
   onCreate?: (data: NewProjectPayload) => Promise<ProjectApi>;
   onUpdate?: (id: string, data: NewProjectPayload) => Promise<ProjectApi>;
 
@@ -52,7 +59,6 @@ function parseISOToDate(iso?: string | null) {
 
 function toISOFromDateNoShift(d?: Date | null) {
   if (!d) return null;
-  // ✅ ใช้ UTC 12:00:00 กัน timezone shift
   const utc = new Date(
     Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0, 0)
   );
@@ -123,14 +129,13 @@ function avatarText(name?: string | null, email?: string | null) {
   return (name?.[0] || email?.[0] || "?").toUpperCase();
 }
 
-// ✅ helper: ดึง userId จาก ProjectMemberApi (กัน schema ต่างกัน)
 function getMemberUserId(m: ProjectMemberApi): string | undefined {
   const anyM = m as any;
   return anyM.userId ?? anyM.user?.id ?? anyM.user?.userId ?? anyM.idUser;
 }
 
 // =========================
-// ✅ Date helpers (Phase within Project)
+// Date helpers (Phase within Project)
 // =========================
 function toDateOnly(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -156,19 +161,28 @@ function validatePhaseWithinProject(params: {
   const { projectStart, projectDue, phaseStart, phaseDue } = params;
 
   if (!isValidDate(projectStart) || !isValidDate(projectDue)) {
-    return { ok: false as const, reason: "กรุณากำหนด Start/Due date ของ Project ก่อน" };
+    return {
+      ok: false as const,
+      reason: "กรุณากำหนด Start/Due date ของ Project ก่อน",
+    };
   }
   const ps = toDateOnly(projectStart!);
   const pd = toDateOnly(projectDue!);
 
   if (!isValidDate(phaseStart) || !isValidDate(phaseDue)) {
-    return { ok: false as const, reason: "กรุณาเลือก Start date และ Due date ของ Phase" };
+    return {
+      ok: false as const,
+      reason: "กรุณาเลือก Start date และ Due date ของ Phase",
+    };
   }
   const s = toDateOnly(phaseStart!);
   const e = toDateOnly(phaseDue!);
 
   if (e.getTime() < s.getTime()) {
-    return { ok: false as const, reason: "Due date ของ Phase ต้องไม่ก่อน Start date" };
+    return {
+      ok: false as const,
+      reason: "Due date ของ Phase ต้องไม่ก่อน Start date",
+    };
   }
   if (s.getTime() < ps.getTime()) {
     return {
@@ -183,6 +197,50 @@ function validatePhaseWithinProject(params: {
     };
   }
   return { ok: true as const };
+}
+
+// =========================
+// Phase status helpers (ใช้แค่แสดง badge)
+// =========================
+type PhaseStatus =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "REVIEW"
+  | "DELIVERED"
+  | "COMPLETED";
+
+const PHASE_STATUS_OPTIONS: Array<{ value: PhaseStatus; labelTH: string }> = [
+  { value: "NOT_STARTED", labelTH: "ยังไม่เริ่ม" },
+  { value: "IN_PROGRESS", labelTH: "กำลังทำ" },
+  { value: "REVIEW", labelTH: "ตรวจงาน" },
+  { value: "DELIVERED", labelTH: "ส่งมอบ" },
+  { value: "COMPLETED", labelTH: "เสร็จสิ้น" },
+];
+
+function normalizePhaseStatus(s?: string | null): PhaseStatus {
+  const ok = PHASE_STATUS_OPTIONS.some((x) => x.value === s);
+  return ok ? (s as PhaseStatus) : "NOT_STARTED";
+}
+function phaseStatusLabelTH(s?: string | null) {
+  const v = normalizePhaseStatus(s);
+  return PHASE_STATUS_OPTIONS.find((x) => x.value === v)?.labelTH ?? v;
+}
+function phaseStatusBadgeClass(s?: string | null) {
+  const v = normalizePhaseStatus(s);
+  const base =
+    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium";
+  switch (v) {
+    case "IN_PROGRESS":
+      return `${base} bg-blue-50 text-blue-700 border-blue-200`;
+    case "REVIEW":
+      return `${base} bg-amber-50 text-amber-700 border-amber-200`;
+    case "DELIVERED":
+      return `${base} bg-emerald-50 text-emerald-700 border-emerald-200`;
+    case "COMPLETED":
+      return `${base} bg-slate-100 text-slate-700 border-slate-200`;
+    default:
+      return `${base} bg-slate-50 text-slate-600 border-slate-200`;
+  }
 }
 
 function ProjectModalInner({
@@ -208,7 +266,6 @@ function ProjectModalInner({
 
   const [allUsers, setAllUsers] = useState<UserApi[]>([]);
   const [initialMembers, setInitialMembers] = useState<ProjectMemberApi[]>([]);
-  // ✅ เก็บ null เพื่อ "ติ๊กออก" โดยไม่ลบ key (กัน UI หาย)
   const [selected, setSelected] = useState<Record<string, ProjectMemberRole | null>>(
     {}
   );
@@ -216,9 +273,7 @@ function ProjectModalInner({
 
   const isEdit = !!initial?.id;
 
-  // =========================
-  // ✅ PHASE UI/STATE
-  // =========================
+  // phases
   const [phasesLoading, setPhasesLoading] = useState(false);
   const [phasesError, setPhasesError] = useState("");
   const [phases, setPhases] = useState<ProjectPhaseApi[]>([]);
@@ -229,6 +284,10 @@ function ProjectModalInner({
   const [phaseDueDate, setPhaseDueDate] = useState<Date | null>(null);
   const [phaseSaving, setPhaseSaving] = useState(false);
   const [phaseSubmitError, setPhaseSubmitError] = useState("");
+
+  const [phaseActionError, setPhaseActionError] = useState("");
+  const [phaseDeleting, setPhaseDeleting] = useState(false);
+  const [phaseReorderSaving, setPhaseReorderSaving] = useState(false);
 
   const resetPhaseForm = () => {
     setPhaseName("");
@@ -261,16 +320,19 @@ function ProjectModalInner({
     setSelected({});
     setUserQuery("");
 
-    // phases reset
     setEnableAddPhase(false);
     resetPhaseForm();
     setPhases([]);
     setPhasesError("");
     setPhasesLoading(false);
+
+    setPhaseActionError("");
+    setPhaseDeleting(false);
+    setPhaseReorderSaving(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial]);
 
-  // โหลด users (ทั้ง create/edit)
+  // load users
   useEffect(() => {
     let cancelled = false;
     setMembersLoading(true);
@@ -295,7 +357,7 @@ function ProjectModalInner({
     };
   }, []);
 
-  // ✅ ถ้า edit: โหลด members เดิมมา sync เข้า selected (ใช้ userId ไม่ใช่ memberId)
+  // load members (edit)
   useEffect(() => {
     if (!isEdit || !initial?.id) return;
 
@@ -329,7 +391,7 @@ function ProjectModalInner({
     };
   }, [isEdit, initial?.id]);
 
-  // ✅ ถ้า edit: โหลด phases จาก ganttService
+  // load phases (edit)
   useEffect(() => {
     if (!isEdit || !initial?.id) return;
 
@@ -386,12 +448,11 @@ function ProjectModalInner({
     });
   }, [allUsers, userQuery]);
 
-  // ✅ ไม่ delete key แล้ว แต่ set เป็น null แทน (ติ๊กออก)
   const toggleUser = (userId: string) => {
     setSelected((prev) => {
       const next = { ...prev };
-      const isChecked = next[userId] != null; // null/undefined = ไม่เลือก
-      next[userId] = isChecked ? null : "MEMBER"; // ✅ default role
+      const isChecked = next[userId] != null;
+      next[userId] = isChecked ? null : "MEMBER";
       return next;
     });
   };
@@ -400,7 +461,6 @@ function ProjectModalInner({
     setSelected((prev) => ({ ...prev, [userId]: normalizeRole(role) }));
   };
 
-  // ✅ sync members ในโหมด edit (diff) — before/after ใช้ userId เหมือนกัน
   const applyMembersDiff = async (projectId: string) => {
     const before = new Map<string, ProjectMemberRole>();
     initialMembers.forEach((m) => {
@@ -410,7 +470,7 @@ function ProjectModalInner({
 
     const after = new Map<string, ProjectMemberRole>();
     Object.entries(selected).forEach(([uid, role]) => {
-      if (role == null) return; // ติ๊กออก
+      if (role == null) return;
       after.set(uid, normalizeRole(role));
     });
 
@@ -422,8 +482,7 @@ function ProjectModalInner({
       if (!before.has(uid)) toAdd.push({ userId: uid, role });
       else {
         const prevRole = before.get(uid);
-        if (prevRole && prevRole !== role)
-          toUpdateRole.push({ userId: uid, role });
+        if (prevRole && prevRole !== role) toUpdateRole.push({ userId: uid, role });
       }
     }
     for (const uid of before.keys()) {
@@ -439,7 +498,6 @@ function ProjectModalInner({
     ]);
   };
 
-  // ✅ add members ในโหมด create (เพิ่มอย่างเดียว)
   const applyMembersForCreate = async (projectId: string) => {
     const toAdd = Object.entries(selected)
       .filter(([, role]) => role != null)
@@ -451,9 +509,7 @@ function ProjectModalInner({
     await Promise.all(toAdd.map((p) => addProjectMember(projectId, p)));
   };
 
-  // =========================
-  // ✅ Phase date clamp (อิง Project ใน form)
-  // =========================
+  // Phase clamp
   const projectStart = form.startDate;
   const projectDue = form.dueDate;
 
@@ -463,29 +519,24 @@ function ProjectModalInner({
     return clampDateToRange(d, projectStart!, projectDue!);
   };
 
-  // ✅ ถ้าเปิด add phase → default = ช่วงของ Project
   const toggleAddPhase = () => {
     setEnableAddPhase((v) => {
       const next = !v;
       setPhaseSubmitError("");
-
       if (next) {
-        // ตอนเปิด: set ค่า default ให้เป็นของ Project ถ้ามี
-        if (isValidDate(projectStart) && !phaseStartDate) setPhaseStartDate(toDateOnly(projectStart!));
-        if (isValidDate(projectDue) && !phaseDueDate) setPhaseDueDate(toDateOnly(projectDue!));
-
-        // ถ้า project มี start/due แต่ phase ยังว่าง → ตั้งให้ครบ
+        if (isValidDate(projectStart) && !phaseStartDate)
+          setPhaseStartDate(toDateOnly(projectStart!));
+        if (isValidDate(projectDue) && !phaseDueDate)
+          setPhaseDueDate(toDateOnly(projectDue!));
         if (isValidDate(projectStart) && isValidDate(projectDue)) {
           setPhaseStartDate((prev) => prev ?? toDateOnly(projectStart!));
           setPhaseDueDate((prev) => prev ?? toDateOnly(projectDue!));
         }
       }
-
       return next;
     });
   };
 
-  // ✅ ถ้า Project date เปลี่ยนระหว่าง edit → clamp phase ให้ไม่หลุดช่วง
   useEffect(() => {
     if (!enableAddPhase) return;
     if (!isValidDate(projectStart) || !isValidDate(projectDue)) return;
@@ -493,7 +544,6 @@ function ProjectModalInner({
     setPhaseStartDate((prev) => (prev ? clampToProject(prev) : prev));
     setPhaseDueDate((prev) => (prev ? clampToProject(prev) : prev));
 
-    // และกันกรณี due < start
     setPhaseDueDate((prev) => {
       if (!prev || !phaseStartDate) return prev;
       const s = clampToProject(phaseStartDate);
@@ -504,7 +554,6 @@ function ProjectModalInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enableAddPhase, form.startDate, form.dueDate]);
 
-  // ✅ สร้าง Phase (POST /projects/{projectId}/phases) จาก ganttService
   const handleCreatePhase = async () => {
     if (!initial?.id) return;
 
@@ -513,20 +562,14 @@ function ProjectModalInner({
     const name = phaseName.trim();
     if (!name) return setPhaseSubmitError("กรุณากรอกชื่อ Phase");
 
-    // ✅ validate ภายใต้ช่วง Project (อิงค่าจาก form)
     const v = validatePhaseWithinProject({
-      projectStart: projectStart,
-      projectDue: projectDue,
+      projectStart,
+      projectDue,
       phaseStart: phaseStartDate,
       phaseDue: phaseDueDate,
     });
+    if (!v.ok) return setPhaseSubmitError(v.reason);
 
-    if (!v.ok) {
-      setPhaseSubmitError(v.reason);
-      return;
-    }
-
-    // ✅ สำคัญ: orderIndex ต้องเป็น integer (แก้ 400)
     const nextOrderIndex =
       phases.length === 0
         ? 0
@@ -535,7 +578,7 @@ function ProjectModalInner({
     const payload: CreateProjectPhasePayload = {
       name,
       description: null,
-      orderIndex: nextOrderIndex, // ✅ required
+      orderIndex: nextOrderIndex,
       status: "NOT_STARTED",
       startDate: toISOFromDateNoShift(toDateOnly(phaseStartDate!)),
       dueDate: toISOFromDateNoShift(toDateOnly(phaseDueDate!)),
@@ -544,20 +587,67 @@ function ProjectModalInner({
     setPhaseSaving(true);
     try {
       const created = await createProjectPhase(initial.id, payload);
-
-      // ✅ แทรกเข้าลิสต์ แล้ว sort ตาม orderIndex
       setPhases((prev) =>
         [...prev, created].sort(
           (a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)
         )
       );
-
       resetPhaseForm();
       setEnableAddPhase(false);
     } catch (e) {
       setPhaseSubmitError(e instanceof Error ? e.message : "สร้าง Phase ไม่สำเร็จ");
     } finally {
       setPhaseSaving(false);
+    }
+  };
+
+  const handleDeletePhase = async (p: ProjectPhaseApi) => {
+    if (!initial?.id) return;
+    const ok = window.confirm(
+      `ต้องการลบ Phase "${p.name}" ใช่ไหม?\n(ลบแล้วกู้คืนไม่ได้)`
+    );
+    if (!ok) return;
+
+    setPhaseActionError("");
+    setPhaseDeleting(true);
+    try {
+      await deleteProjectPhase(initial.id, p.id);
+      await refreshPhases(initial.id);
+    } catch (e) {
+      setPhaseActionError(e instanceof Error ? e.message : "ลบ Phase ไม่สำเร็จ");
+    } finally {
+      setPhaseDeleting(false);
+    }
+  };
+
+  const phasesSorted = useMemo(() => {
+    return [...phases].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  }, [phases]);
+
+  const handleMovePhase = async (phaseId: string, dir: -1 | 1) => {
+    if (!initial?.id) return;
+    setPhaseActionError("");
+
+    const list = phasesSorted;
+    const idx = list.findIndex((x) => x.id === phaseId);
+    if (idx < 0) return;
+
+    const target = idx + dir;
+    if (target < 0 || target >= list.length) return;
+
+    const next = [...list];
+    [next[idx], next[target]] = [next[target], next[idx]];
+
+    const payload: ReorderProjectPhasesPayload = { phaseIds: next.map((x) => x.id) };
+
+    setPhaseReorderSaving(true);
+    try {
+      await reorderProjectPhases(initial.id, payload);
+      await refreshPhases(initial.id);
+    } catch (e) {
+      setPhaseActionError(e instanceof Error ? e.message : "เรียงลำดับ Phase ไม่สำเร็จ");
+    } finally {
+      setPhaseReorderSaving(false);
     }
   };
 
@@ -611,10 +701,6 @@ function ProjectModalInner({
   const inputClass =
     "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white outline-none " +
     "focus:border-blue-500 focus:ring-1 focus:ring-blue-500";
-
-  const phasesSorted = useMemo(() => {
-    return [...phases].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-  }, [phases]);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-4">
@@ -737,14 +823,12 @@ function ProjectModalInner({
             </div>
           </div>
 
+          {/* ========================= PHASE SECTION (no PATCH) ========================= */}
           {isEdit && initial?.id && (
             <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">การเพิ่ม Phase</div>
-                  <div className="text-[11px] text-slate-500">
-                    เปิดใช้งานเพื่อเพิ่ม Phase (ชื่อ + Start date + Due date)
-                  </div>
+                  <div className="text-sm font-semibold text-slate-900">การจัดการ Phase</div>
                   <div className="mt-1 text-[11px] text-slate-500">
                     ช่วง Project:{" "}
                     <span className="font-semibold text-slate-700">
@@ -791,8 +875,6 @@ function ProjectModalInner({
                         onChange={(d) => {
                           const clamped = d ? clampToProject(d) : null;
                           setPhaseStartDate(clamped);
-
-                          // ถ้า due < start → ดัน due ให้เท่ากับ start
                           setPhaseDueDate((prev) => {
                             if (!prev || !clamped) return prev;
                             const e = clampToProject(prev);
@@ -802,14 +884,8 @@ function ProjectModalInner({
                         }}
                         placeholder="วัน/เดือน/ปี"
                         disabled={phaseSaving || submitting}
-                        // ✅ อย่างน้อยให้ไม่ก่อน start ของ project
                         minDate={form.startDate ?? undefined}
                       />
-                      {!form.startDate || !form.dueDate ? (
-                        <div className="text-[11px] text-slate-500">
-                          * ต้องกำหนด Start/Due date ของ Project ก่อน ถึงจะเพิ่ม Phase ได้ถูกต้อง
-                        </div>
-                      ) : null}
                     </div>
 
                     <div className="space-y-1">
@@ -818,8 +894,6 @@ function ProjectModalInner({
                         value={phaseDueDate}
                         onChange={(d) => {
                           const clamped = d ? clampToProject(d) : null;
-
-                          // due ต้อง >= start
                           const start = phaseStartDate ? clampToProject(phaseStartDate) : null;
                           if (clamped && start && clamped.getTime() < start.getTime()) {
                             setPhaseDueDate(start);
@@ -873,11 +947,20 @@ function ProjectModalInner({
                 </div>
               )}
 
-              {/* list phases */}
+              {phaseActionError ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {phaseActionError}
+                </div>
+              ) : null}
+
               <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
                 <div className="px-4 py-2 text-xs font-semibold text-slate-700 border-b border-slate-100 flex items-center justify-between">
                   <span>Phases</span>
-                  {phasesLoading ? <span className="text-slate-500">กำลังโหลด…</span> : null}
+                  <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
+                    {phaseReorderSaving ? <span>กำลังเรียง…</span> : null}
+                    {phaseDeleting ? <span>กำลังลบ…</span> : null}
+                    {phasesLoading ? <span>กำลังโหลด…</span> : null}
+                  </div>
                 </div>
 
                 {phasesError ? (
@@ -888,27 +971,83 @@ function ProjectModalInner({
                   <div className="p-4 text-sm text-slate-500">ยังไม่มี Phase</div>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {phasesSorted.map((p) => (
-                      <div key={p.id} className="px-4 py-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold text-slate-900">{p.name}</div>
-                          <div className="text-[11px] text-slate-400">
-                            order: {p.orderIndex ?? 0}
+                    {phasesSorted.map((p, idx) => {
+                      const disableActions =
+                        submitting ||
+                        phaseSaving ||
+                        phasesLoading ||
+                        phaseReorderSaving ||
+                        phaseDeleting;
+
+                      const isFirst = idx === 0;
+                      const isLast = idx === phasesSorted.length - 1;
+
+                      return (
+                        <div key={p.id} className="px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="text-sm font-semibold text-slate-900 truncate">
+                                  {p.name}
+                                </div>
+                              </div>
+
+                              <div className="mt-1 text-xs text-slate-500">
+                                {p.startDate
+                                  ? new Date(p.startDate).toLocaleDateString("th-TH")
+                                  : "-"}{" "}
+                                –{" "}
+                                {p.dueDate
+                                  ? new Date(p.dueDate).toLocaleDateString("th-TH")
+                                  : "-"}
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 flex items-center gap-1">
+                              <span className="text-[11px] text-slate-400 mr-1">
+                                order: {p.orderIndex ?? idx}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() => handleMovePhase(p.id, -1)}
+                                disabled={disableActions || isFirst}
+                                className="rounded-lg border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                                title="เลื่อนขึ้น"
+                              >
+                                <ChevronUpIcon className="h-4 w-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMovePhase(p.id, 1)}
+                                disabled={disableActions || isLast}
+                                className="rounded-lg border border-slate-200 bg-white p-1 text-slate-500 hover:bg-slate-50 disabled:opacity-50"
+                                title="เลื่อนลง"
+                              >
+                                <ChevronDownIcon className="h-4 w-4" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePhase(p)}
+                                disabled={disableActions}
+                                className="rounded-lg border border-slate-200 bg-white p-1 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                title="ลบ"
+                              >
+                                <TrashIcon className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {p.startDate ? new Date(p.startDate).toLocaleDateString("th-TH") : "-"} –{" "}
-                          {p.dueDate ? new Date(p.dueDate).toLocaleDateString("th-TH") : "-"}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             </div>
           )}
 
-          {/* MEMBERS */}
+          {/* ========================= MEMBERS ========================= */}
           <div className="rounded-2xl border border-slate-200 p-4 bg-slate-50 space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -950,7 +1089,6 @@ function ProjectModalInner({
                   <div className="divide-y divide-slate-100">
                     {filteredUsers.map((u) => {
                       const checked = selected[u.id] != null;
-
                       const safeValue = checked
                         ? normalizeRole(selected[u.id] as ProjectMemberRole)
                         : "MEMBER";

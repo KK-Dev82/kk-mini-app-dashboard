@@ -1,5 +1,5 @@
 // src/lib/ganttService.ts
-import { apiGet, apiPost } from "./apiClient";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from "./apiClient";
 
 export type GanttTaskColor =
   | "green"
@@ -127,6 +127,72 @@ export async function fetchProjectPhaseById(
     `/projects/${encodeURIComponent(projectId)}/phases/${encodeURIComponent(
       phaseId
     )}?${qs}`,
+    { useEnvToken: true }
+  );
+}
+
+// =========================
+// ✅ NEW: update / delete / reorder phase (ตาม swagger)
+// =========================
+
+/** swagger: PATCH /projects/{projectId}/phases/{id} (All fields optional) */
+export type UpdateProjectPhasePayload = {
+  name?: string;
+  description?: string | null;
+  status?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  deliverDate?: string | null;
+  orderIndex?: number | null;
+  trelloListId?: string | null;
+};
+
+export async function updateProjectPhase(
+  projectId: string,
+  phaseId: string,
+  payload: UpdateProjectPhasePayload
+): Promise<ProjectPhaseApi> {
+  return apiPatch<ProjectPhaseApi>(
+    `/projects/${encodeURIComponent(projectId)}/phases/${encodeURIComponent(phaseId)}`,
+    payload,
+    { useEnvToken: true }
+  );
+}
+
+/** swagger: DELETE /projects/{projectId}/phases/{id} */
+export type DeleteProjectPhaseResponse = {
+  message?: string;
+};
+
+export async function deleteProjectPhase(
+  projectId: string,
+  phaseId: string
+): Promise<DeleteProjectPhaseResponse> {
+  return apiDelete<DeleteProjectPhaseResponse>(
+    `/projects/${encodeURIComponent(projectId)}/phases/${encodeURIComponent(phaseId)}`,
+    { useEnvToken: true }
+  );
+}
+
+/** swagger: PUT /projects/{projectId}/phases/reorder */
+export type ReorderProjectPhasesPayload = {
+  phaseIds: string[];
+};
+
+// swagger example response: [{ id, name, orderIndex }]
+export type ReorderedPhaseApi = {
+  id: string;
+  name?: string;
+  orderIndex?: number | null;
+};
+
+export async function reorderProjectPhases(
+  projectId: string,
+  payload: ReorderProjectPhasesPayload
+): Promise<ReorderedPhaseApi[]> {
+  return apiPut<ReorderedPhaseApi[]>(
+    `/projects/${encodeURIComponent(projectId)}/phases/reorder`,
+    payload,
     { useEnvToken: true }
   );
 }

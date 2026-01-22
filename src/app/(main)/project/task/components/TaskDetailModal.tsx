@@ -481,16 +481,6 @@ export default function TaskDetailModal({
               <div className="text-sm font-semibold text-white/90">การทำงาน</div>
 
               <div className="mt-3 space-y-3">
-                {/* ✅ แสดง Phase ตอนยังไม่แก้ไข */}
-                {!editing ? (
-                  <div className="space-y-1">
-                    <div className="text-xs text-white/60">Phase</div>
-                    <div className="rounded-xl bg-white/10 px-3 py-2 text-sm text-white/85">
-                      {displayPhaseName ? displayPhaseName : "(ไม่อยู่ใน Phase)"}
-                    </div>
-                  </div>
-                ) : null}
-
                 <a
                   href={card.url}
                   target="_blank"
