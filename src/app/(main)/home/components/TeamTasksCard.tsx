@@ -14,7 +14,7 @@ type Props = {
   teamTasks: TeamTasks;
 };
 
-const MAX_TASKS_BEFORE_SCROLL = 10;
+const MAX_TASKS_BEFORE_SCROLL = 5;
 
 /**
  * ✅ NEW RULE:
@@ -60,7 +60,9 @@ function ymdToUtcDay(ymd: string): number | null {
 /** today (local) -> utc day number (day-only) */
 function todayLocalDay(): number {
   const now = new Date();
-  return Math.floor(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / DAY_MS);
+  return Math.floor(
+    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / DAY_MS
+  );
 }
 
 /** YYYY-MM-DD -> "YYYY-MM" */
@@ -91,6 +93,17 @@ function getProgressPercent(t: TaskItem) {
     : 0;
 }
 
+/** ✅ NEW: split assignees string -> list */
+function splitAssignees(raw: string | null | undefined): string[] {
+  const s = (raw ?? "").trim();
+  if (!s) return [];
+  if (s.toLowerCase() === "unassigned" || s === "-") return [];
+  return s
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
 /** Inline TaskCard */
 function TaskCard({
   task,
@@ -103,6 +116,11 @@ function TaskCard({
   const sStyle = statusStyles[task.status] ?? statusStyles["To Do"];
   const progress = getProgressPercent(task);
   const hasProgress = showProgress && task.subTasksTotal > 0;
+
+  const assignees = splitAssignees(task.assignee);
+  const assigneeCount = assignees.length;
+  const shownAssignees = assignees.slice(0, 8);
+  const moreCount = Math.max(0, assignees.length - shownAssignees.length);
 
   return (
     <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
@@ -160,9 +178,54 @@ function TaskCard({
       )}
 
       <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500">
-        <span className="inline-flex items-center gap-1.5">
-          <UserIcon className="h-4 w-4 text-slate-400" />
-          {task.assignee || "Unassigned"}
+        {/* ✅ NEW: show count + hover tooltip */}
+        <span className="relative inline-flex items-center gap-1.5">
+          <span
+            className="inline-flex items-center gap-1.5 group cursor-help outline-none"
+            tabIndex={0}
+            aria-label={
+              assigneeCount === 0
+                ? "Assignees: Unassigned"
+                : `Assignees: ${assigneeCount}`
+            }
+          >
+            <UserIcon className="h-4 w-4 text-slate-400" />
+
+            <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-white px-2 py-[1px] text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
+              {assigneeCount}
+            </span>
+
+            {/* Tooltip */}
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-[260px] max-w-[260px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700 shadow-lg opacity-0 translate-y-1 transition
+                         group-hover:opacity-100 group-hover:translate-y-0
+                         group-focus-within:opacity-100 group-focus-within:translate-y-0"
+            >
+              <div className="text-[10px] font-semibold text-slate-500 mb-1">
+                Assignees
+              </div>
+
+              {assigneeCount === 0 ? (
+                <div className="text-slate-600">Unassigned</div>
+              ) : (
+                <ul className="space-y-0.5">
+                  {shownAssignees.map((name) => (
+                    <li
+                      key={name}
+                      className="truncate whitespace-nowrap text-slate-700"
+                      title={name}
+                    >
+                      {name}
+                    </li>
+                  ))}
+                  {moreCount > 0 && (
+                    <li className="text-slate-500">+{moreCount} more</li>
+                  )}
+                </ul>
+              )}
+            </span>
+          </span>
         </span>
 
         <span className="inline-flex items-center gap-1.5">
@@ -260,11 +323,13 @@ export default function TeamTasksCard({ teamTasks }: Props) {
     });
 
     // ✅ นับจำนวนงานที่เหลื่อมเดือน (startMonth != dueMonth) แต่ยังนับอยู่เดือน start
-    const overlapCount0 = thisMonth.filter(({ hasStart, hasDue, startMonthKey, dueMonthKey }) => {
-      if (!hasStart || !hasDue) return false;
-      if (!startMonthKey || !dueMonthKey) return false;
-      return startMonthKey !== dueMonthKey;
-    }).length;
+    const overlapCount0 = thisMonth.filter(
+      ({ hasStart, hasDue, startMonthKey, dueMonthKey }) => {
+        if (!hasStart || !hasDue) return false;
+        if (!startMonthKey || !dueMonthKey) return false;
+        return startMonthKey !== dueMonthKey;
+      }
+    ).length;
 
     // ✅ ฝั่งซ้าย: duration(start->due) <= 7 และไม่ overdue
     const dueSoon = thisMonth
@@ -330,9 +395,7 @@ export default function TeamTasksCard({ teamTasks }: Props) {
           <div className="text-2xl font-semibold text-slate-900">
             {dueSoonCount}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
-            Due Soon
-          </div>
+          <div className="text-xs text-slate-500 mt-1">Due Soon</div>
         </div>
 
         <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
