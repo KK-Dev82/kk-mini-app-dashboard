@@ -1,8 +1,8 @@
-import AttendanceSummaryCard from "./components/AttendanceSummaryCard";
-import PendingLeaveCard from "./components/PendingLeaveCard";
-import TeamTasksCard from "./components/TeamTasksCard";
+import AttendanceSummaryCard from "./components/TodayAttendanceCard";
+import PendingLeaveCard from "./components/PendingLeaveRequestsCard";
+import TeamTasksCard from "./components/TeamTasksOverviewCard";
 import { fetchDashboardOverview } from "../../lib/dashboardService";
-import GanttYearWidget from "./components/GanttYearWidget";
+import GanttYearWidget from "./components/ProjectGanttYearOverlay";
 
 export default async function HomePage() {
   const data = await fetchDashboardOverview();

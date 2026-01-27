@@ -46,7 +46,7 @@ export default function PendingLeaveCard() {
           onClick={() => router.push("/history?tab=leave")}
           className="text-xs font-medium text-blue-600 hover:text-blue-700"
         >
-          Review
+          View All
         </button>
       </div>
 

@@ -3,7 +3,7 @@
 
 import { useMemo } from "react";
 import GanttRowLayout from "../../../../component/ganttchart/GanttRowLayout";
-import { addDaysLocal, clampNum } from "./dateUtils";
+import { addDaysLocal, clampNum } from "./ganttDateUtils";
 
 const LABEL_SHIFT_PX = 6;
 

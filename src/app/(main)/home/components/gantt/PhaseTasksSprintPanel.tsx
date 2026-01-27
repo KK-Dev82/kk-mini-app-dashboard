@@ -22,12 +22,12 @@ import {
   diffDays,
   addDays,
   startOfDayLocal,
-} from "./_internal/dateUtils";
+} from "./_internal/ganttDateUtils";
 import {
   SprintHeaderReal,
   SprintTimeline,
   type DayBar,
-} from "./_internal/SprintTimelineParts";
+} from "./_internal/SprintTimeline";
 
 const TASK_COLORS: GanttTaskColor[] = [
   "blue",

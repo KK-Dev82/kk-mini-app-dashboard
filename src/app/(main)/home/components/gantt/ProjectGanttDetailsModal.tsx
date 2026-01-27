@@ -13,10 +13,10 @@ import GanttMonthHeader from "../../../component/ganttchart/GanttMonthHeader";
 import GanttTimeline, { type GanttTimelineBar } from "../../../component/ganttchart/GanttTimeline";
 import GanttRowLayout from "../../../component/ganttchart/GanttRowLayout";
 
-import PhaseTasksModal from "./PhaseTasksModal";
+import PhaseTasksModal from "./PhaseTasksSprintPanel";
 
 // ✅ NEW: mapping utils
-import { mapTaskToBar, type TaskBar } from "./_internal/projectGanttMap";
+import { mapTaskToBar, type TaskBar } from "./_internal/ganttTaskBarMapper";
 
 type Stage = "phases" | "tasks";
 
