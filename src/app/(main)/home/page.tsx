@@ -3,12 +3,14 @@ import PendingLeaveCard from "./components/PendingLeaveRequestsCard";
 import TeamTasksCard from "./components/TeamTasksOverviewCard";
 import { fetchDashboardOverview } from "../../lib/dashboardService";
 import GanttYearWidget from "./components/ProjectGanttYearOverlay";
+import LogoutButton from "./components/LogoutButton";
 
 export default async function HomePage() {
   const data = await fetchDashboardOverview();
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-6 space-y-6">
+      <LogoutButton />
       <AttendanceSummaryCard />
       <PendingLeaveCard />
       <GanttYearWidget />

@@ -136,10 +136,10 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Sign out button (ตอนนี้แค่ UI เฉย ๆ) */}
+      {/* Sign out button */}
       <button
         type="button"
-        onClick={() => console.log("Sign out clicked")}
+        onClick={() => window.location.href = '/auth/logout'}
         className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full bg-red-500 px-4 py-2.5 text-xs font-medium text-white shadow-sm hover:bg-red-600"
       >
         <ArrowRightOnRectangleIcon className="h-4 w-4" />

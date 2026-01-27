@@ -198,9 +198,7 @@ function TaskCard({
             {/* Tooltip */}
             <span
               role="tooltip"
-              className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-[260px] max-w-[260px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700 shadow-lg opacity-0 translate-y-1 transition
-                         group-hover:opacity-100 group-hover:translate-y-0
-                         group-focus-within:opacity-100 group-focus-within:translate-y-0"
+              className="pointer-events-none absolute left-0 top-full z-10 mt-2 w-[260px] max-w-[260px] rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-700 shadow-lg opacity-0 translate-y-1 transition group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0"
             >
               <div className="text-[10px] font-semibold text-slate-500 mb-1">
                 Assignees
