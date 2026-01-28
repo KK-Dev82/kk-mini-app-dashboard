@@ -13,7 +13,7 @@ function getStoredToken() {
   return localStorage.getItem("accessToken") ?? "";
 }
 
-type ApiOptions = {
+export type ApiOptions = {
   token?: string;
 
   /** ✅ ไม่ต้องแนบ auth เลย (สำหรับ endpoint public) */

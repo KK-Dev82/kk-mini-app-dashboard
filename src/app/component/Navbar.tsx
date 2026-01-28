@@ -5,6 +5,7 @@ import {
   ClipboardDocumentListIcon,
   CalendarDaysIcon,
   UserCircleIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 
 import Link from "next/link";
@@ -14,6 +15,7 @@ const navItems = [
   { href: "/home", label: "Home", icon: Squares2X2Icon },
   { href: "/project", label: "Project", icon: ClipboardDocumentListIcon },
   { href: "/history", label: "History", icon: CalendarDaysIcon },
+  { href: "/user", label: "User", icon: UsersIcon }, // ✅ เพิ่มแท็บ User
 ];
 
 export default function Navbar() {
