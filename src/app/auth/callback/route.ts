@@ -39,11 +39,7 @@ export async function GET(request: NextRequest) {
     const backendResponse = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/callback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: user.email,
-        name: user.name,
-        sub: user.sub,
-      }),
+      body: JSON.stringify({ user }),
     });
 
     console.log('Backend response status:', backendResponse.status);
@@ -51,13 +47,20 @@ export async function GET(request: NextRequest) {
       const data = await backendResponse.json();
       console.log('Backend response data:', data);
       const { access_token } = data;
-      const cookieStore = await cookies();
-      cookieStore.set('access_token', access_token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7,
-      });
+      
+      if (access_token) {
+        const cookieStore = await cookies();
+        cookieStore.set('access_token', access_token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 60 * 60 * 24 * 7,
+          path: '/',
+        });
+        console.log('✅ Cookie set successfully');
+      } else {
+        console.log('❌ No access_token in backend response');
+      }
     } else {
       console.error('Backend callback failed:', await backendResponse.text());
       // Store Auth0 token temporarily

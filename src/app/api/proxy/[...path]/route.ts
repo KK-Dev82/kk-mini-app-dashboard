@@ -16,13 +16,10 @@ function getProxyPath(req: NextRequest, paramsPath: unknown) {
 }
 
 /**
- * ✅ บังคับใช้ ENV token เป็นหลัก
- * priority: env -> header -> cookie
- *
- * ถ้าต้องการ "ใช้ env เสมอ" แบบไม่สน header/cookie เลย:
- * - ตั้งค่า FORCE_ENV_TOKEN = true
+ * ✅ ใช้ token จาก cookie (Auth0) เป็นหลัก
+ * priority: cookie -> env (fallback)
  */
-const FORCE_ENV_TOKEN = true;
+const FORCE_ENV_TOKEN = false;
 
 function pickToken(req: NextRequest) {
   // ✅ ถ้า client ส่ง x-no-auth: 1 => ห้ามใส่ token
@@ -40,21 +37,27 @@ function pickToken(req: NextRequest) {
 
   const cookieToken = req.cookies.get("access_token")?.value ?? "";
 
+  console.log('🔑 Token sources:', { 
+    hasCookie: !!cookieToken, 
+    hasHeader: !!headerToken, 
+    hasEnv: !!envToken 
+  });
+
   if (FORCE_ENV_TOKEN && envToken) {
     return { token: envToken, source: "env" as const };
   }
 
-  // ✅ priority: env -> header -> cookie
-  const token = envToken || headerToken || cookieToken;
+  // ✅ priority: cookie -> header -> env (fallback)
+  const token = cookieToken || headerToken || envToken;
 
   return {
     token,
-    source: envToken
-      ? ("env" as const)
+    source: cookieToken
+      ? ("cookie" as const)
       : headerToken
       ? ("header" as const)
-      : cookieToken
-      ? ("cookie" as const)
+      : envToken
+      ? ("env" as const)
       : ("none" as const),
   };
 }

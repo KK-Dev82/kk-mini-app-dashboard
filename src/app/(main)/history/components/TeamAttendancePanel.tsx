@@ -241,9 +241,9 @@ export default function TeamAttendancePanel() {
   }, [mode]);
 
   const rows = useMemo<Row[]>(() => {
-    const list = (data ?? []).slice().sort((a, b) => {
+    const list = Array.isArray(data) ? data.slice().sort((a, b) => {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    }) : [];
 
     return list.map((it) => {
       const status = calcStatus(it);
