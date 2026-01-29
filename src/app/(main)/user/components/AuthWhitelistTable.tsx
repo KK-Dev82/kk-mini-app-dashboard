@@ -8,6 +8,10 @@ type Row = {
   id: string;
   email: string;
   role?: string | null;
+
+  // ✅ เพิ่ม 2 ฟิลด์นี้ (มาจาก /users เมื่อ email match)
+  name?: string | null;
+  picture?: string | null;
 };
 
 type Props = {
@@ -15,7 +19,7 @@ type Props = {
   whitelistByUserId: Record<string, WhitelistCheckApi | null>;
   loading: boolean;
   error: string | null;
-  onChanged?: () => Promise<void> | void; // ให้ page reload list
+  onChanged?: () => Promise<void> | void;
 };
 
 export default function AuthWhitelistTable({
@@ -132,6 +136,8 @@ export default function AuthWhitelistTable({
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
+                  <th className="px-4 py-3 text-left font-medium w-[72px]">Picture</th>
+                  <th className="px-4 py-3 text-left font-medium">Name</th>
                   <th className="px-4 py-3 text-left font-medium">Email</th>
                   <th className="px-4 py-3 text-left font-medium">Role</th>
                   <th className="px-4 py-3 text-left font-medium">Whitelist</th>
@@ -142,13 +148,13 @@ export default function AuthWhitelistTable({
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                    <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
                       กำลังโหลดข้อมูล...
                     </td>
                   </tr>
                 ) : users.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-10 text-center text-slate-500">
+                    <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
                       ไม่พบข้อมูล
                     </td>
                   </tr>
@@ -158,6 +164,26 @@ export default function AuthWhitelistTable({
 
                     return (
                       <tr key={u.id} className="hover:bg-slate-50/60">
+                        {/* ✅ picture: ถ้าไม่มี -> ไม่แสดงอะไร */}
+                        <td className="px-4 py-3">
+                          {u.picture ? (
+                            <img
+                              src={u.picture}
+                              alt={u.name || u.email || "user"}
+                              className="h-9 w-9 rounded-full object-cover"
+                            />
+                          ) : null}
+                        </td>
+
+                        {/* ✅ name: ถ้าไม่ match -> เป็น "-" */}
+                        <td className="px-4 py-3 text-slate-800">
+                          {u.name ? (
+                            <span className="font-medium">{u.name}</span>
+                          ) : (
+                            <span className="text-slate-400">ผู้ใช้ยังไม่ได้ซิงค์กับระบบ</span>
+                          )}
+                        </td>
+
                         <td className="px-4 py-3 text-slate-800">{u.email || "-"}</td>
 
                         <td className="px-4 py-3 text-slate-700">{u.role || "-"}</td>

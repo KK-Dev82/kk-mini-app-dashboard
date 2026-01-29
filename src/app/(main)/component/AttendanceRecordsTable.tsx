@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment } from "react";
-import { EllipsisVerticalIcon } from "@heroicons/react/24/outline";
 
 export type StatusUI = "ONSITE" | "OFFSITE" | "LEAVE" | "UNKNOWN";
 
@@ -21,7 +20,7 @@ export type AttendanceTableRow = {
   timeLabel: string;
   distanceLabel: string;
 
-  // ถ้าจะให้เปิดดู raw json
+  // ยังเก็บไว้ได้ (เผื่ออนาคต) แต่ UI จะไม่แสดง raw แล้ว
   raw?: unknown;
 };
 
@@ -50,9 +49,6 @@ export default function AttendanceRecordsTable({
   rows,
   loading,
 
-  openKey,
-  onToggleOpenKey,
-
   emptyText = "No records",
   loadingText = "Loading…",
   selectUserText = "Please select a user",
@@ -70,9 +66,6 @@ export default function AttendanceRecordsTable({
   rows: AttendanceTableRow[];
   loading: boolean;
 
-  openKey: string | null;
-  onToggleOpenKey: (key: string) => void;
-
   emptyText?: string;
   loadingText?: string;
   selectUserText?: string;
@@ -87,6 +80,8 @@ export default function AttendanceRecordsTable({
   disablePrev: boolean;
   disableNext: boolean;
 }) {
+  const COLS = 7;
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
       <div className="overflow-x-auto">
@@ -100,26 +95,34 @@ export default function AttendanceRecordsTable({
               <th className="px-5 py-4">TIME</th>
               <th className="px-5 py-4">DISTANCE</th>
               <th className="px-5 py-4">GPS</th>
-              <th className="px-5 py-4 text-right">ACTIONS</th>
             </tr>
           </thead>
 
           <tbody className="divide-y divide-slate-100 bg-white">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-5 py-12 text-center text-sm text-slate-500">
+                <td
+                  colSpan={COLS}
+                  className="px-5 py-12 text-center text-sm text-slate-500"
+                >
                   {loadingText}
                 </td>
               </tr>
             ) : showSelectUserHint ? (
               <tr>
-                <td colSpan={8} className="px-5 py-12 text-center text-sm text-slate-500">
+                <td
+                  colSpan={COLS}
+                  className="px-5 py-12 text-center text-sm text-slate-500"
+                >
                   {selectUserText}
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-5 py-12 text-center text-sm text-slate-500">
+                <td
+                  colSpan={COLS}
+                  className="px-5 py-12 text-center text-sm text-slate-500"
+                >
                   {emptyText}
                 </td>
               </tr>
@@ -149,12 +152,16 @@ export default function AttendanceRecordsTable({
                             <div className="truncate font-semibold text-slate-900">
                               {r.employeeName}
                             </div>
-                            <div className="truncate text-xs text-slate-500">{r.employeeSub}</div>
+                            <div className="truncate text-xs text-slate-500">
+                              {r.employeeSub}
+                            </div>
                           </div>
                         </div>
                       </td>
 
-                      <td className="px-5 py-4 font-semibold text-slate-900">{r.typeText}</td>
+                      <td className="px-5 py-4 font-semibold text-slate-900">
+                        {r.typeText}
+                      </td>
 
                       <td className="px-5 py-4">
                         <span
@@ -167,9 +174,13 @@ export default function AttendanceRecordsTable({
                         </span>
                       </td>
 
-                      <td className="px-5 py-4 text-slate-600">{r.worksiteName}</td>
+                      <td className="px-5 py-4 text-slate-600">
+                        {r.worksiteName}
+                      </td>
                       <td className="px-5 py-4">{r.timeLabel}</td>
-                      <td className="px-5 py-4 text-slate-600">{r.distanceLabel}</td>
+                      <td className="px-5 py-4 text-slate-600">
+                        {r.distanceLabel}
+                      </td>
 
                       <td className="px-5 py-4">
                         <span
@@ -179,31 +190,7 @@ export default function AttendanceRecordsTable({
                           ].join(" ")}
                         />
                       </td>
-
-                      <td className="px-5 py-4 text-right">
-                        <button
-                          type="button"
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-xl hover:bg-slate-50"
-                          onClick={() => onToggleOpenKey(r.key)}
-                          title="Details"
-                        >
-                          <EllipsisVerticalIcon className="h-5 w-5 text-slate-500" />
-                        </button>
-                      </td>
                     </tr>
-
-                    {openKey === r.key && (
-                      <tr>
-                        <td colSpan={8} className="bg-slate-50 px-5 py-5">
-                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                            <div className="text-sm font-semibold text-slate-900">Raw (API)</div>
-                            <pre className="mt-3 overflow-auto text-[11px] text-slate-700">
-{JSON.stringify(r.raw ?? r, null, 2)}
-                            </pre>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                   </Fragment>
                 );
               })

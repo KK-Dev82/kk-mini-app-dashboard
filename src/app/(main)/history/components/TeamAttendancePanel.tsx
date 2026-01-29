@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDownIcon } from "@heroicons/react/24/outline";
+import {
+  ChevronDownIcon,
+  XMarkIcon,
+  MagnifyingGlassIcon,
+} from "@heroicons/react/24/outline";
 
 import {
-  fetchMyCheckinHistory,
-  fetchCheckinHistoryByUserId,
+  fetchMyCheckinHistoryPage,
+  fetchCheckinHistoryByUserIdPage,
   type CheckinHistoryItem,
+  type PaginationMeta,
   CheckinType,
   LocationType,
   LeaveType,
@@ -92,6 +97,168 @@ function userLabel(u: UserApi) {
   return name || email || u.id;
 }
 
+function userMatches(u: UserApi, q: string) {
+  const query = q.trim().toLowerCase();
+  if (!query) return true;
+  const name = (u.name || "").toLowerCase();
+  const email = (u.email || "").toLowerCase();
+  const id = (u.id || "").toLowerCase();
+  return name.includes(query) || email.includes(query) || id.includes(query);
+}
+
+function UserAutocompleteDropdown({
+  users,
+  value,
+  onChange,
+  loading,
+  disabled,
+  placeholder = "Select a user",
+}: {
+  users: UserApi[];
+  value: string;
+  onChange: (id: string) => void;
+  loading: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const selected = useMemo(
+    () => users.find((u) => u.id === value) ?? null,
+    [users, value]
+  );
+
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState<string>("");
+
+  useEffect(() => {
+    setQuery(selected ? userLabel(selected) : "");
+  }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = useMemo(() => {
+    const list = users.filter((u) => userMatches(u, query));
+    if (value) {
+      const idx = list.findIndex((u) => u.id === value);
+      if (idx > 0) {
+        const copy = list.slice();
+        const [pick] = copy.splice(idx, 1);
+        copy.unshift(pick);
+        return copy;
+      }
+    }
+    return list;
+  }, [users, query, value]);
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      const el = wrapRef.current;
+      if (!el) return;
+      if (!el.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
+  function commitSelect(id: string) {
+    onChange(id);
+    setOpen(false);
+  }
+
+  function clearSelect() {
+    onChange("");
+    setQuery("");
+    setOpen(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <div
+        className={[
+          "flex h-10 items-center gap-2 rounded-xl border bg-white px-3 pr-9 text-sm",
+          disabled ? "border-slate-200 opacity-60" : "border-slate-200",
+        ].join(" ")}
+        onClick={() => {
+          if (disabled) return;
+          setOpen(true);
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+      >
+        <MagnifyingGlassIcon className="h-4 w-4 text-slate-400" />
+
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            if (!open) setOpen(true);
+          }}
+          onFocus={() => {
+            if (!disabled) setOpen(true);
+          }}
+          placeholder={loading ? "Loading users…" : placeholder}
+          disabled={disabled || loading}
+          className="w-full bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+        />
+
+        {!!value && !disabled && !loading && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              clearSelect();
+            }}
+            className="absolute right-8 top-1/2 -translate-y-1/2 rounded-lg p-1 hover:bg-slate-50"
+            title="Clear"
+          >
+            <XMarkIcon className="h-4 w-4 text-slate-400" />
+          </button>
+        )}
+
+        <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      </div>
+
+      {open && !disabled && (
+        <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+          <div className="max-h-72 overflow-auto py-1">
+            {loading ? (
+              <div className="px-3 py-2 text-sm text-slate-500">Loading…</div>
+            ) : filtered.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-slate-500">No results</div>
+            ) : (
+              filtered.map((u) => {
+                const isSelected = u.id === value;
+
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => commitSelect(u.id)}
+                    className={[
+                      "flex w-full items-start gap-3 px-3 py-2 text-left text-sm",
+                      isSelected ? "bg-blue-50" : "hover:bg-slate-50",
+                    ].join(" ")}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-slate-900">
+                        {(u.name || "").trim() || u.email || u.id}
+                      </div>
+                      <div className="truncate text-xs text-slate-500">
+                        {u.email || u.id}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Row = {
   key: string;
   item: CheckinHistoryItem;
@@ -109,6 +276,9 @@ type Row = {
   distanceLabel: string;
 };
 
+// ✅ default ของ API (ใช้แค่คำนวณ UI เผื่อ backend ไม่ส่ง meta.limit)
+const API_DEFAULT_LIMIT = 20;
+
 export default function TeamAttendancePanel() {
   const [mode, setMode] = useState<Mode>("me");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
@@ -117,31 +287,33 @@ export default function TeamAttendancePanel() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState<string | null>(null);
 
-  const [data, setData] = useState<CheckinHistoryItem[] | null>(null);
+  const [data, setData] = useState<CheckinHistoryItem[]>([]);
+  const [meta, setMeta] = useState<PaginationMeta | null>(null);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [openKey, setOpenKey] = useState<string | null>(null);
-
-  // ✅ Worksites (Admin only) สำหรับ dropdown filter
+  // ✅ Worksites
   const [worksites, setWorksites] = useState<WorksiteApi[]>([]);
   const [worksitesLoading, setWorksitesLoading] = useState(false);
   const [worksitesError, setWorksitesError] = useState<string | null>(null);
 
-  // ✅ modal state
+  // ✅ modal
   const [openCreateWorksite, setOpenCreateWorksite] = useState(false);
   const [openManageWorksites, setOpenManageWorksites] = useState(false);
 
-  // Filters
+  // Filters (client filter)
   const [worksiteFilter, setWorksiteFilter] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<"ALL" | StatusUI>("ALL");
 
-  // Pagination
-  const PAGE_SIZE = 10;
+  // ✅ Server pagination
   const [page, setPage] = useState<number>(1);
 
-  // กัน request เก่าทับ request ใหม่ (เวลาสลับ user รัวๆ)
+  // กัน request เก่าทับ request ใหม่
   const reqSeqRef = useRef(0);
+
+  // ✅ เก็บ limit จาก API (ถ้า meta.limit มา จะอัปเดต)
+  const apiLimitRef = useRef<number>(API_DEFAULT_LIMIT);
 
   const userMap = useMemo(() => {
     const m = new Map<string, UserApi>();
@@ -164,7 +336,6 @@ export default function TeamAttendancePanel() {
     }
   }
 
-  // ✅ return list เผื่อเอาไปเช็ค filter reset หลังจัดการ worksites
   async function loadWorksites(): Promise<WorksiteApi[]> {
     try {
       setWorksitesLoading(true);
@@ -183,67 +354,92 @@ export default function TeamAttendancePanel() {
     }
   }
 
-  async function loadHistory(m: Mode, userId?: string) {
+  async function loadHistory(m: Mode, userId: string | undefined, pageNum: number) {
     const currentSeq = ++reqSeqRef.current;
 
     try {
       setLoading(true);
       setError(null);
 
+      // ✅ ไม่ส่ง limit -> ให้ API ใช้ default ของมันเอง
       const res =
         m === "me"
-          ? await fetchMyCheckinHistory()
-          : await fetchCheckinHistoryByUserId((userId ?? "").trim());
+          ? await fetchMyCheckinHistoryPage({ page: pageNum })
+          : await fetchCheckinHistoryByUserIdPage((userId ?? "").trim(), {
+            page: pageNum,
+          });
 
       if (currentSeq !== reqSeqRef.current) return;
-      setData(res ?? []);
+
+      setData(res.items ?? []);
+      setMeta(res.meta ?? { page: pageNum });
+
+      if (typeof res.meta?.limit === "number" && res.meta.limit > 0) {
+        apiLimitRef.current = res.meta.limit;
+      }
     } catch (e) {
       console.error(e);
       if (currentSeq !== reqSeqRef.current) return;
 
       setError("Failed to load check-in history");
-      setData(null);
+      setData([]);
+      setMeta(null);
     } finally {
       if (currentSeq !== reqSeqRef.current) return;
       setLoading(false);
     }
   }
 
-  // โหลด users + worksites (admin)
+  // load initial
   useEffect(() => {
     loadUsers();
     loadWorksites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ตอนเปิดหน้า: default เป็น "me"
-  useEffect(() => {
-    loadHistory("me");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // เปลี่ยน mode
+  // mode change reset
   useEffect(() => {
     setPage(1);
-    setOpenKey(null);
     setWorksiteFilter("ALL");
     setStatusFilter("ALL");
 
     if (mode === "me") {
       setSelectedUserId("");
-      loadHistory("me");
     } else {
       setData([]);
+      setMeta(null);
       setLoading(false);
       setError(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  // fetch when mode/selected/page changed
+  useEffect(() => {
+    if (mode === "me") {
+      loadHistory("me", undefined, page);
+      return;
+    }
+
+    if (!selectedUserId) {
+      setData([]);
+      setMeta(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    loadHistory("user", selectedUserId, page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, selectedUserId, page]);
+
   const rows = useMemo<Row[]>(() => {
-    const list = Array.isArray(data) ? data.slice().sort((a, b) => {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    }) : [];
+    const list = data
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
 
     return list.map((it) => {
       const status = calcStatus(it);
@@ -254,8 +450,8 @@ export default function TeamAttendancePanel() {
         (it.location === LocationType.OFFSITE
           ? "OFFSITE"
           : it.worksiteId
-          ? `Worksite ${it.worksiteId}`
-          : "—");
+            ? `Worksite ${it.worksiteId}`
+            : "—");
 
       const u = userMap.get(it.userId);
 
@@ -287,12 +483,9 @@ export default function TeamAttendancePanel() {
   }, [data, mode, userMap]);
 
   const worksiteOptions = useMemo(() => {
-    // UX: เอารายชื่อจาก master worksites (admin) เป็นหลัก
-    // แล้ว merge กับค่าที่เจอในประวัติ (เช่น OFFSITE / —) เพื่อไม่ให้ filter แล้วหาไม่เจอ
     const set = new Set<string>();
 
     for (const w of worksites) {
-      // ถ้าอยากให้แสดง inactive ด้วย ให้เอาเงื่อนไขนี้ออก
       if (w.isActive === false) continue;
       if (w.name) set.add(w.name);
     }
@@ -313,24 +506,32 @@ export default function TeamAttendancePanel() {
 
   useEffect(() => {
     setPage(1);
-    setOpenKey(null);
   }, [worksiteFilter, statusFilter]);
 
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
+  const currentPage = meta?.page ?? page;
+  const perPage = meta?.limit ?? apiLimitRef.current;
 
-  const paged = useMemo(() => {
-    const start = (safePage - 1) * PAGE_SIZE;
-    return filtered.slice(start, start + PAGE_SIZE);
-  }, [filtered, safePage]);
+  const showingFrom =
+    filtered.length === 0 ? 0 : (currentPage - 1) * perPage + 1;
+  const showingTo =
+    filtered.length === 0 ? 0 : (currentPage - 1) * perPage + filtered.length;
 
-  const showingFrom = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const showingTo = Math.min(total, safePage * PAGE_SIZE);
+  const total =
+    typeof meta?.total === "number"
+      ? meta.total
+      : // fallback
+      showingTo;
 
-  // ✅ map เป็น UI rows สำหรับ component กลาง
+  const disablePrev = currentPage <= 1 || loading;
+
+  const disableNext = loading
+    ? true
+    : typeof meta?.totalPages === "number"
+      ? currentPage >= meta.totalPages
+      : data.length < perPage;
+
   const tableRows = useMemo<AttendanceTableRow[]>(() => {
-    return paged.map((r) => ({
+    return filtered.map((r) => ({
       key: r.key,
       employeeName: r.employeeName,
       employeeSub: r.employeeSub,
@@ -347,7 +548,7 @@ export default function TeamAttendancePanel() {
 
       raw: r.item,
     }));
-  }, [paged]);
+  }, [filtered]);
 
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -363,7 +564,6 @@ export default function TeamAttendancePanel() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Create worksite button */}
           <button
             type="button"
             onClick={() => setOpenCreateWorksite(true)}
@@ -372,7 +572,6 @@ export default function TeamAttendancePanel() {
             + Create Worksite
           </button>
 
-          {/* Manage worksites */}
           <button
             type="button"
             onClick={() => setOpenManageWorksites(true)}
@@ -452,37 +651,16 @@ export default function TeamAttendancePanel() {
 
         {mode === "user" && (
           <div className="mt-3">
-            <div className="relative">
-              <select
-                value={selectedUserId}
-                onChange={(e) => {
-                  const uid = e.target.value;
-                  setSelectedUserId(uid);
-                  setOpenKey(null);
-                  setPage(1);
-
-                  if (!uid) {
-                    setData([]);
-                    setError(null);
-                    setLoading(false);
-                    return;
-                  }
-                  loadHistory("user", uid);
-                }}
-                className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 pr-10 text-sm text-slate-700 hover:bg-slate-50"
-                disabled={usersLoading}
-              >
-                <option value="">
-                  {usersLoading ? "Loading users…" : "Select a user"}
-                </option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {userLabel(u)}
-                  </option>
-                ))}
-              </select>
-              <ChevronDownIcon className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            </div>
+            <UserAutocompleteDropdown
+              users={users}
+              value={selectedUserId}
+              loading={usersLoading}
+              disabled={false}
+              onChange={(id) => {
+                setSelectedUserId(id);
+                setPage(1);
+              }}
+            />
 
             {usersError && (
               <div className="mt-2 rounded-xl border border-slate-200 bg-white p-3 text-sm text-rose-600">
@@ -498,16 +676,20 @@ export default function TeamAttendancePanel() {
         <AttendanceRecordsTable
           rows={tableRows}
           loading={loading}
-          openKey={openKey}
-          onToggleOpenKey={(key) => setOpenKey((k) => (k === key ? null : key))}
           showSelectUserHint={mode === "user" && !selectedUserId && !loading}
           showingFrom={showingFrom}
           showingTo={showingTo}
           total={total}
           onPrev={() => setPage((p) => Math.max(1, p - 1))}
-          onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
-          disablePrev={safePage <= 1 || loading}
-          disableNext={safePage >= totalPages || loading}
+          onNext={() =>
+            setPage((p) =>
+              typeof meta?.totalPages === "number"
+                ? Math.min(meta.totalPages, p + 1)
+                : p + 1
+            )
+          }
+          disablePrev={disablePrev}
+          disableNext={disableNext}
         />
 
         {error && (
@@ -523,10 +705,8 @@ export default function TeamAttendancePanel() {
         onCreated={async (ws) => {
           const latest = await loadWorksites();
 
-          // ถ้าสร้างใหม่สำเร็จ: ตั้ง filter ไปที่ตัวที่สร้าง
           if (ws?.name) setWorksiteFilter(ws.name);
 
-          // กันเคส list ใหม่ไม่มีชื่อ (เผื่อ api ไม่คืน name)
           if (ws?.name) {
             const activeNames = new Set(
               latest.filter((w) => w.isActive !== false).map((w) => w.name)
@@ -542,7 +722,6 @@ export default function TeamAttendancePanel() {
         onChanged={async () => {
           const latest = await loadWorksites();
 
-          // กันเคสกำลัง filter อยู่ที่ worksite ที่ถูก deactivate
           if (worksiteFilter !== "ALL") {
             const activeNames = new Set(
               latest.filter((w) => w.isActive !== false).map((w) => w.name)

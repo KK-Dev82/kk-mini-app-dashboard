@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import {
   fetchAuthWhitelist,
+  fetchUsers,
+  type UserApi,
   type WhitelistCheckApi,
   type WhitelistEntryApi,
 } from "../../lib/userService";
@@ -14,16 +16,13 @@ type DisplayUser = {
   id: string;
   email: string;
   role?: string | null;
+
+  // ✅ เติมจาก /users (ถ้า email match)
+  name?: string | null;
+  picture?: string | null;
 };
 
-function toDisplayUser(entry: WhitelistEntryApi): DisplayUser {
-  const email = entry.email ?? "";
-  return {
-    id: entry.id ?? email,
-    email,
-    role: entry.role ?? null,
-  };
-}
+const normEmail = (v: string) => (v ?? "").trim().toLowerCase();
 
 export default function UserPage() {
   const [users, setUsers] = useState<DisplayUser[]>([]);
@@ -41,8 +40,41 @@ export default function UserPage() {
     setCheckingWhitelist(true);
 
     try {
+      // ✅ whitelist เป็นตัวหลักในการแสดงผล
       const entries = await fetchAuthWhitelist();
-      const list = (Array.isArray(entries) ? entries : []).map(toDisplayUser);
+
+      // ✅ users เอาไว้เติม name/picture เท่านั้น (ถ้าดึงไม่ได้ก็ยังแสดง whitelist ได้)
+      let usersApi: UserApi[] = [];
+      try {
+        usersApi = await fetchUsers();
+      } catch {
+        usersApi = [];
+      }
+
+      const userByEmail = new Map<string, UserApi>();
+      for (const u of usersApi) {
+        if (u?.email) userByEmail.set(normEmail(u.email), u);
+      }
+
+      const list: DisplayUser[] = (Array.isArray(entries) ? entries : []).map(
+        (entry: WhitelistEntryApi) => {
+          const email = entry.email ?? "";
+          const u = userByEmail.get(normEmail(email));
+
+          return {
+            id: entry.id ?? email,
+            email,
+            role: entry.role ?? null,
+
+            // ✅ ถ้าไม่ match -> ไม่เติมข้อมูลจาก user
+            name: u?.name ?? null,
+
+            // ✅ ถ้า match แต่ไม่มี picture -> ไม่ต้องแสดง (ปล่อย null)
+            picture: u?.picture ? u.picture : null,
+          };
+        }
+      );
+
       setUsers(list);
 
       // ทุกตัวใน list = อยู่ใน whitelist => Allowed
@@ -70,7 +102,6 @@ export default function UserPage() {
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
