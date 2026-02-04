@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import type {
   TrelloCard,
@@ -64,6 +64,78 @@ function stripPhaseTag(desc?: string | null) {
   return desc.replace(/\[PHASE:[^\]]+\]\s*/gi, "").trim();
 }
 
+/** ---------- Checklist Draft Helpers ---------- */
+
+function buildChecklistStateMap(card: TrelloCard): Record<string, ChecklistItemState> {
+  const m: Record<string, ChecklistItemState> = {};
+  for (const cl of card.checklists ?? []) {
+    for (const it of cl.checkItems ?? []) {
+      m[it.id] = it.state === "complete" ? "complete" : "incomplete";
+    }
+  }
+  return m;
+}
+
+function computeBadgesFromChecklists(card: TrelloCard) {
+  let total = 0;
+  let done = 0;
+
+  for (const cl of card.checklists ?? []) {
+    for (const it of cl.checkItems ?? []) {
+      total += 1;
+      if (it.state === "complete") done += 1;
+    }
+  }
+
+  return {
+    ...(card.badges ?? {}),
+    checkItems: total,
+    checkItemsChecked: done,
+  };
+}
+
+function applyChecklistDraftToCard(
+  card: TrelloCard,
+  draft: Record<string, ChecklistItemState>
+): TrelloCard {
+  const next: TrelloCard = {
+    ...card,
+    checklists: (card.checklists ?? []).map((cl) => ({
+      ...cl,
+      checkItems: (cl.checkItems ?? []).map((it) => {
+        const s = draft[it.id];
+        if (!s) return it;
+        return { ...it, state: s };
+      }),
+    })),
+  };
+
+  return {
+    ...next,
+    badges: computeBadgesFromChecklists(next),
+  };
+}
+
+// จำกัดจำนวน request พร้อมกัน (กันช้า/กันโดน rate limit)
+async function asyncPool<T, R>(
+  limit: number,
+  arr: T[],
+  worker: (item: T, index: number) => Promise<R>
+) {
+  const ret: R[] = new Array(arr.length);
+  let idx = 0;
+
+  const runners = new Array(Math.min(limit, arr.length)).fill(null).map(async () => {
+    while (idx < arr.length) {
+      const current = idx++;
+      ret[current] = await worker(arr[current], current);
+    }
+  });
+
+  await Promise.all(runners);
+  return ret;
+}
+
 export default function TaskDetailModal({
   open,
   onClose,
@@ -102,7 +174,13 @@ export default function TaskDetailModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>("");
 
-  const [checkingId, setCheckingId] = useState<string>("");
+  // ✅ checklist: draft + confirm
+  const [checklistSaving, setChecklistSaving] = useState(false);
+  const [checklistErr, setChecklistErr] = useState<string>("");
+  const [checklistDraft, setChecklistDraft] = useState<Record<string, ChecklistItemState>>(
+    {}
+  );
+  const checklistOriginalRef = useRef<Record<string, ChecklistItemState>>({});
 
   const [form, setForm] = useState<{
     listId: string;
@@ -134,7 +212,13 @@ export default function TaskDetailModal({
     setEditing(false);
     setErr("");
     setSaving(false);
-    setCheckingId("");
+
+    // ✅ reset checklist draft
+    setChecklistSaving(false);
+    setChecklistErr("");
+    const initMap = buildChecklistStateMap(card);
+    checklistOriginalRef.current = initMap;
+    setChecklistDraft(initMap);
 
     const initialPhaseId = String(((card as any).phaseId as string | undefined) ?? "").trim();
 
@@ -159,9 +243,7 @@ export default function TaskDetailModal({
   }, [card]);
 
   const displayPhaseName = useMemo(() => {
-    // กัน card เป็น null ตอน modal ปิด (แต่ hook ต้องถูกเรียกเสมอ)
     if (!card) return "";
-
     if (editing) {
       const id = (form.phaseId ?? "").trim();
       return id ? phaseNameMap.get(id) ?? "" : "";
@@ -170,6 +252,23 @@ export default function TaskDetailModal({
     if (cardPhaseId) return phaseNameMap.get(cardPhaseId) ?? "";
     return "";
   }, [card, editing, form.phaseId, phaseNameMap, cardPhaseId, cardPhaseName]);
+
+  // ✅ diff checklist changes (draft vs original)
+  const checklistChanges = useMemo(() => {
+    if (!card) return [];
+    const original = checklistOriginalRef.current;
+    const draft = checklistDraft;
+
+    const changes: { id: string; state: ChecklistItemState }[] = [];
+    for (const [id, state] of Object.entries(draft)) {
+      const prev = original[id];
+      if (!prev) continue;
+      if (prev !== state) changes.push({ id, state });
+    }
+    return changes;
+  }, [card, checklistDraft]);
+
+  const pendingCount = checklistChanges.length;
 
   // ✅ early return หลัง hook ทั้งหมด
   if (!open || !card) return null;
@@ -184,42 +283,69 @@ export default function TaskDetailModal({
     });
   };
 
-  const patchChecklistItem = (checkItemId: string, nextState: ChecklistItemState) => {
-    const nextCard: TrelloCard = {
-      ...card,
-      checklists: (card.checklists ?? []).map((cl) => ({
-        ...cl,
-        checkItems: (cl.checkItems ?? []).map((it) =>
-          it.id === checkItemId ? { ...it, state: nextState } : it
-        ),
-      })),
-    };
-    onUpdated(nextCard);
+  // ✅ toggle ใน draft (ไม่ยิง API)
+  const handleToggleChecklistDraft = (checkItemId: string) => {
+    if (checklistSaving) return;
+
+    setChecklistErr("");
+
+    const current = checklistDraft[checkItemId] ?? "incomplete";
+    const nextState: ChecklistItemState = current === "complete" ? "incomplete" : "complete";
+
+    const nextDraft = { ...checklistDraft, [checkItemId]: nextState };
+    setChecklistDraft(nextDraft);
+
+    // ✅ อัปเดต UI ทันที (progress เปลี่ยนทันที)
+    onUpdated(applyChecklistDraftToCard(card, nextDraft));
   };
 
-  const handleToggleChecklist = async (checkItemId: string, currentState: string) => {
-    if (!card?.id) return;
+  const handleResetChecklistChanges = () => {
+    const original = checklistOriginalRef.current;
+    setChecklistErr("");
+    setChecklistDraft(original);
+    onUpdated(applyChecklistDraftToCard(card, original));
+  };
 
-    const nextState: ChecklistItemState =
-      currentState === "complete" ? "incomplete" : "complete";
+  // ✅ ยิง API ตอนกด “ยืนยัน” เท่านั้น
+  const handleConfirmChecklistUpdate = async () => {
+    if (!card?.id) return;
+    if (pendingCount === 0) return;
 
     try {
-      setErr("");
-      setCheckingId(checkItemId);
+      setChecklistErr("");
+      setChecklistSaving(true);
 
-      patchChecklistItem(checkItemId, nextState);
-      await updateChecklistItemState(card.id, checkItemId, nextState);
+      const concurrency = 8;
+
+      const results = await asyncPool(concurrency, checklistChanges, async (it) => {
+        try {
+          await updateChecklistItemState(card.id, it.id, it.state);
+          return { id: it.id, ok: true as const };
+        } catch (e) {
+          return {
+            id: it.id,
+            ok: false as const,
+            error: e instanceof Error ? e.message : String(e ?? "failed"),
+          };
+        }
+      });
+
+      const failed = results.filter((x) => !x.ok);
+
+      if (failed.length > 0) {
+        setChecklistErr(`อัปเดตไม่สำเร็จ ${failed.length} รายการ`);
+        // เพื่อความชัวร์ ดึงของจริงจาก server
+        await onReload();
+        return;
+      }
+
+      // ✅ commit draft -> original
+      checklistOriginalRef.current = { ...checklistDraft };
+
+      // ✅ reload ทีเดียว
       await onReload();
-    } catch (e) {
-      patchChecklistItem(
-        checkItemId,
-        currentState === "complete" ? "complete" : "incomplete"
-      );
-
-      const msg = e instanceof Error ? e.message : "Update checklist failed";
-      setErr(msg);
     } finally {
-      setCheckingId("");
+      setChecklistSaving(false);
     }
   };
 
@@ -396,6 +522,7 @@ export default function TaskDetailModal({
               )}
             </section>
 
+            {/* ✅ CHECKLIST */}
             <section className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold text-white/90">
@@ -426,19 +553,24 @@ export default function TaskDetailModal({
 
                       <div className="mt-3 space-y-2">
                         {(cl.checkItems ?? []).map((it) => {
-                          const done = it.state === "complete";
-                          const busy = checkingId === it.id;
+                          const draftState =
+                            checklistDraft[it.id] ??
+                            (it.state === "complete" ? "complete" : "incomplete");
+
+                          const done = draftState === "complete";
+                          const orig = checklistOriginalRef.current[it.id];
+                          const dirty = orig ? orig !== draftState : false;
 
                           return (
                             <button
                               key={it.id}
                               type="button"
-                              onClick={() => handleToggleChecklist(it.id, it.state)}
-                              disabled={busy}
+                              onClick={() => handleToggleChecklistDraft(it.id)}
+                              disabled={checklistSaving}
                               className={[
                                 "w-full text-left flex items-start gap-3 rounded-xl px-2 py-1",
                                 "hover:bg-white/5 transition",
-                                busy ? "opacity-60 cursor-not-allowed" : "",
+                                checklistSaving ? "opacity-60 cursor-not-allowed" : "",
                               ].join(" ")}
                             >
                               <span
@@ -455,13 +587,15 @@ export default function TaskDetailModal({
 
                               <div
                                 className={[
-                                  "text-sm",
+                                  "text-sm flex items-center gap-2",
                                   done ? "text-white/70 line-through" : "text-white/85",
                                 ].join(" ")}
                               >
-                                {it.name}
-                                {busy ? (
-                                  <span className="ml-2 text-xs text-white/40">...</span>
+                                <span>{it.name}</span>
+                                {dirty ? (
+                                  <span className="text-[11px] rounded-full bg-amber-400/15 px-2 py-0.5 text-amber-100 ring-1 ring-amber-300/20">
+                                    ยังไม่บันทึก
+                                  </span>
                                 ) : null}
                               </div>
                             </button>
@@ -472,6 +606,46 @@ export default function TaskDetailModal({
                   ))}
                 </div>
               )}
+
+              {/* ✅ action bar: ยืนยันทีเดียว */}
+              {pendingCount > 0 ? (
+                <div className="rounded-2xl bg-amber-400/10 p-3 ring-1 ring-amber-300/20">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-amber-100">
+                      มีการเปลี่ยนแปลง {pendingCount} รายการ (ยังไม่บันทึก)
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleResetChecklistChanges}
+                        disabled={checklistSaving}
+                        className="rounded-xl bg-white/10 px-3 py-2 text-xs text-white/85 hover:bg-white/15 disabled:opacity-60"
+                      >
+                        ยกเลิกการเปลี่ยนแปลง
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmChecklistUpdate}
+                        disabled={checklistSaving}
+                        className="rounded-xl bg-emerald-500/80 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                      >
+                        {checklistSaving ? "กำลังอัปเดต..." : "ยืนยันการอัปเดต"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {checklistErr ? (
+                    <div className="mt-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
+                      {checklistErr}
+                    </div>
+                  ) : null}
+                </div>
+              ) : checklistErr ? (
+                <div className="rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
+                  {checklistErr}
+                </div>
+              ) : null}
             </section>
           </div>
 
