@@ -1,23 +1,21 @@
+// src/app/lib/profileService.ts
 import { apiGet } from "./apiClient";
 
-export type TeamMember = {
-  id: number;
-  name: string;
-  initials: string;
-};
-
-export type UserProfile = {
-  id: number;
-  name: string;
-  initials: string;
-  title: string;
+export type UserProfileApi = {
+  id: string;
   email: string;
-  department: string;
-  role: string;
-  teamName: string;
-  teamMembers: TeamMember[];
+  name: string;
+  picture?: string | null;
+  trelloMemberId?: string | null;
+  role?: string | null;
 };
 
-export async function fetchUserProfile(): Promise<UserProfile> {
-  return apiGet<UserProfile>("/api/profile");
+export async function fetchUserProfile(options?: {
+  token?: string;
+  useEnvToken?: boolean;
+}): Promise<UserProfileApi> {
+  return apiGet<UserProfileApi>("/users/profile", {
+    token: options?.token,
+    useEnvToken: options?.useEnvToken ?? true,
+  });
 }
