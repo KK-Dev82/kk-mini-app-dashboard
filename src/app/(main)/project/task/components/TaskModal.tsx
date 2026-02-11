@@ -271,7 +271,13 @@ function isDateStrValid(v: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
-export default function TaskModal({ open, onClose, onCreate, members, phases }: Props) {
+export default function TaskModal({
+  open,
+  onClose,
+  onCreate,
+  members,
+  phases,
+}: Props) {
   const memberOptions = useMemo<Member[]>(() => members ?? [], [members]);
   const membersReady = (members ?? []).length > 0;
 
@@ -387,8 +393,10 @@ export default function TaskModal({ open, onClose, onCreate, members, phases }: 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+      {/* ✅ จำกัดความสูงตาม viewport + ทำให้ modal เลื่อนได้ภายใน */}
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
+        {/* Header (ไม่เลื่อน) */}
+        <div className="flex flex-none items-center justify-between border-b border-slate-100 px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">เพิ่มการ์ดใหม่</h2>
             <p className="text-xs text-slate-500">
@@ -408,179 +416,184 @@ export default function TaskModal({ open, onClose, onCreate, members, phases }: 
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-5">
-          {error && (
-            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 gap-4">
-            <div>
-              <Label>ชื่อ Task</Label>
-              <InputBase
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="กรอกชื่อ Task"
-                disabled={submitting}
-              />
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <Label>รายละเอียด</Label>
-            <TextareaBase
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              placeholder="อธิบายงานคร่าว ๆ ..."
-              disabled={submitting}
-            />
-          </div>
-
-          <div className="mt-4">
-            <Label>Phase</Label>
-            <PhaseDropdown
-              phases={phaseOptions}
-              value={phaseId}
-              onChange={setPhaseId}
-              disabled={!phasesReady}
-            />
-            {!phasesReady && (
-              <div className="mt-1 text-[11px] text-slate-500">
-                กำลังโหลด Phase...
+        {/* Form wrapper */}
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          {/* Body (เลื่อนเฉพาะส่วนนี้) */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {error && (
+              <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
               </div>
             )}
 
-            {selectedPhase && phaseMin && phaseMax ? (
-              <div className="mt-1 text-[11px] text-slate-500">
-                ช่วง Phase: {phaseMin} – {phaseMax}
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <Label>ชื่อ Task</Label>
+                <InputBase
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="กรอกชื่อ Task"
+                  disabled={submitting}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <Label>รายละเอียด</Label>
+              <TextareaBase
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={4}
+                placeholder="อธิบายงานคร่าว ๆ ..."
+                disabled={submitting}
+              />
+            </div>
+
+            <div className="mt-4">
+              <Label>Phase</Label>
+              <PhaseDropdown
+                phases={phaseOptions}
+                value={phaseId}
+                onChange={setPhaseId}
+                disabled={!phasesReady}
+              />
+              {!phasesReady && (
+                <div className="mt-1 text-[11px] text-slate-500">
+                  กำลังโหลด Phase...
+                </div>
+              )}
+
+              {selectedPhase && phaseMin && phaseMax ? (
+                <div className="mt-1 text-[11px] text-slate-500">
+                  ช่วง Phase: {phaseMin} – {phaseMax}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <Label>Start Date</Label>
+                <InputBase
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  disabled={submitting}
+                  className={
+                    startOutOfPhase || rangeInvalid
+                      ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
+                      : ""
+                  }
+                />
+                {startOutOfPhase ? (
+                  <div className="mt-1 text-[11px] text-red-600">
+                    วันที่อยู่นอกช่วงของ Phase
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <Label>Due Date</Label>
+                <InputBase
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  disabled={submitting}
+                  className={
+                    endOutOfPhase || rangeInvalid
+                      ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
+                      : ""
+                  }
+                />
+                {endOutOfPhase ? (
+                  <div className="mt-1 text-[11px] text-red-600">
+                    วันที่อยู่นอกช่วงของ Phase
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            {rangeInvalid ? (
+              <div className="mt-2 text-[11px] text-red-600">
+                Due Date ต้องไม่ก่อน Start Date
               </div>
             ) : null}
-          </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <Label>Start Date</Label>
-              <InputBase
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                disabled={submitting}
-                className={
-                  startOutOfPhase || rangeInvalid
-                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
-                    : ""
-                }
+            <div className="mt-4">
+              <Label>Assignees</Label>
+              <MembersDropdown
+                members={memberOptions}
+                value={memberIds}
+                onChange={setMemberIds}
+                disabled={!membersReady}
               />
-              {startOutOfPhase ? (
-                <div className="mt-1 text-[11px] text-red-600">
-                  วันที่อยู่นอกช่วงของ Phase
-                </div>
-              ) : null}
             </div>
 
-            <div>
-              <Label>Due Date</Label>
-              <InputBase
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                disabled={submitting}
-                className={
-                  endOutOfPhase || rangeInvalid
-                    ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
-                    : ""
-                }
-              />
-              {endOutOfPhase ? (
-                <div className="mt-1 text-[11px] text-red-600">
-                  วันที่อยู่นอกช่วงของ Phase
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          {rangeInvalid ? (
-            <div className="mt-2 text-[11px] text-red-600">
-              Due Date ต้องไม่ก่อน Start Date
-            </div>
-          ) : null}
-
-          <div className="mt-4">
-            <Label>Assignees</Label>
-            <MembersDropdown
-              members={memberOptions}
-              value={memberIds}
-              onChange={setMemberIds}
-              disabled={!membersReady}
-            />
-          </div>
-
-          <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">
-                  Checklist / Subtasks
-                </div>
-                <div className="text-xs text-slate-500">
-                  เปิดใช้งานเพื่อเพิ่มรายการย่อย
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setHasSubtasks((v) => !v)}
-                className={[
-                  "relative inline-flex h-7 w-12 items-center rounded-full transition",
-                  hasSubtasks ? "bg-blue-600" : "bg-slate-300",
-                ].join(" ")}
-                aria-label="toggle subtasks"
-              >
-                <span
-                  className={[
-                    "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
-                    hasSubtasks ? "translate-x-6" : "translate-x-1",
-                  ].join(" ")}
-                />
-              </button>
-            </div>
-
-            {hasSubtasks && (
-              <div className="mt-4 space-y-2">
-                {subtasks.map((s, idx) => (
-                  <div key={idx} className="flex gap-2">
-                    <InputBase
-                      placeholder={`Subtask ${idx + 1}`}
-                      value={s}
-                      onChange={(e) => updateSubtask(idx, e.target.value)}
-                      disabled={submitting}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSubtask(idx)}
-                      className="rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-100"
-                      disabled={submitting || subtasks.length === 1}
-                      title="ลบ"
-                    >
-                      ✕
-                    </button>
+            <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">
+                    Checklist / Subtasks
                   </div>
-                ))}
+                  <div className="text-xs text-slate-500">
+                    เปิดใช้งานเพื่อเพิ่มรายการย่อย
+                  </div>
+                </div>
 
                 <button
                   type="button"
-                  onClick={addSubtask}
-                  className="mt-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
-                  disabled={submitting}
+                  onClick={() => setHasSubtasks((v) => !v)}
+                  className={[
+                    "relative inline-flex h-7 w-12 items-center rounded-full transition",
+                    hasSubtasks ? "bg-blue-600" : "bg-slate-300",
+                  ].join(" ")}
+                  aria-label="toggle subtasks"
                 >
-                  + เพิ่มรายการย่อย
+                  <span
+                    className={[
+                      "inline-block h-5 w-5 transform rounded-full bg-white shadow transition",
+                      hasSubtasks ? "translate-x-6" : "translate-x-1",
+                    ].join(" ")}
+                  />
                 </button>
               </div>
-            )}
+
+              {hasSubtasks && (
+                <div className="mt-4 space-y-2">
+                  {subtasks.map((s, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <InputBase
+                        placeholder={`Subtask ${idx + 1}`}
+                        value={s}
+                        onChange={(e) => updateSubtask(idx, e.target.value)}
+                        disabled={submitting}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeSubtask(idx)}
+                        className="rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-100"
+                        disabled={submitting || subtasks.length === 1}
+                        title="ลบ"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={addSubtask}
+                    className="mt-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-100"
+                    disabled={submitting}
+                  >
+                    + เพิ่มรายการย่อย
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-end gap-3">
+          {/* Footer (ไม่เลื่อน) */}
+          <div className="flex flex-none items-center justify-end gap-3 border-t border-slate-100 bg-white px-6 py-4">
             <button
               type="button"
               onClick={() => {

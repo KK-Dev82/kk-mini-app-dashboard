@@ -429,8 +429,10 @@ export default function TaskDetailModal({
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-5xl rounded-2xl bg-slate-900 text-white shadow-2xl ring-1 ring-white/10">
-        <div className="flex items-start justify-between border-b border-white/10 px-6 py-5">
+      {/* ✅ FIX: จำกัดความสูงตาม viewport + ทำให้ modal เลื่อนภายในได้ */}
+      <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-900 text-white shadow-2xl ring-1 ring-white/10">
+        {/* ✅ Header ไม่เลื่อน */}
+        <div className="flex flex-none items-start justify-between border-b border-white/10 px-6 py-5">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               {!!projectTag && (
@@ -479,337 +481,338 @@ export default function TaskDetailModal({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 px-6 py-6 md:grid-cols-[1fr_320px]">
-          <div className="space-y-6">
-            <section className="space-y-2">
-              <div className="text-sm font-semibold text-white/90">สมาชิก</div>
-              {selectedMembers.length === 0 ? (
-                <div className="text-sm text-white/60">-</div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {selectedMembers.map((m) => (
-                    <span
-                      key={m.id}
-                      className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-sm"
-                    >
-                      <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">
-                        {(m.initials || m.fullName?.[0] || m.username?.[0] || "?")
-                          .toString()
-                          .toUpperCase()}
-                      </span>
-                      <span className="text-white/90">{m.fullName || m.username}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-2">
-              <div className="text-sm font-semibold text-white/90">คำอธิบาย</div>
-              {!editing ? (
-                <div className="rounded-2xl bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap">
-                  {shownDesc ? shownDesc : "-"}
-                </div>
-              ) : (
-                <textarea
-                  value={form.desc}
-                  onChange={(e) => setForm((p) => ({ ...p, desc: e.target.value }))}
-                  rows={5}
-                  className="w-full rounded-2xl bg-white/10 p-4 text-sm text-white/90 outline-none ring-1 ring-white/10 focus:ring-white/30"
-                  placeholder="รายละเอียด..."
-                  disabled={saving}
-                />
-              )}
-            </section>
-
-            {/* ✅ CHECKLIST */}
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-white/90">
-                  ขั้นตอนการทำงาน (Checklist)
-                </div>
-                <div className="text-xs text-white/60">
-                  {progress}% ({card.badges?.checkItemsChecked ?? 0}/
-                  {card.badges?.checkItems ?? 0})
-                </div>
-              </div>
-
-              <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
-                <div
-                  className="h-full rounded-full bg-emerald-400/80 transition-all"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-
-              {(card.checklists ?? []).length === 0 ? (
-                <div className="text-sm text-white/60">-</div>
-              ) : (
-                <div className="space-y-3">
-                  {card.checklists.map((cl) => (
-                    <div key={cl.id} className="rounded-2xl bg-white/5 p-4">
-                      <div className="text-sm font-semibold text-white/90">
-                        {cl.name || "Checklist"}
-                      </div>
-
-                      <div className="mt-3 space-y-2">
-                        {(cl.checkItems ?? []).map((it) => {
-                          const draftState =
-                            checklistDraft[it.id] ??
-                            (it.state === "complete" ? "complete" : "incomplete");
-
-                          const done = draftState === "complete";
-                          const orig = checklistOriginalRef.current[it.id];
-                          const dirty = orig ? orig !== draftState : false;
-
-                          return (
-                            <button
-                              key={it.id}
-                              type="button"
-                              onClick={() => handleToggleChecklistDraft(it.id)}
-                              disabled={checklistSaving}
-                              className={[
-                                "w-full text-left flex items-start gap-3 rounded-xl px-2 py-1",
-                                "hover:bg-white/5 transition",
-                                checklistSaving ? "opacity-60 cursor-not-allowed" : "",
-                              ].join(" ")}
-                            >
-                              <span
-                                className={[
-                                  "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded border",
-                                  done
-                                    ? "border-emerald-300/50 bg-emerald-400/20"
-                                    : "border-white/20 bg-white/5",
-                                ].join(" ")}
-                                aria-hidden
-                              >
-                                {done ? "✓" : ""}
-                              </span>
-
-                              <div
-                                className={[
-                                  "text-sm flex items-center gap-2",
-                                  done ? "text-white/70 line-through" : "text-white/85",
-                                ].join(" ")}
-                              >
-                                <span>{it.name}</span>
-                                {dirty ? (
-                                  <span className="text-[11px] rounded-full bg-amber-400/15 px-2 py-0.5 text-amber-100 ring-1 ring-amber-300/20">
-                                    ยังไม่บันทึก
-                                  </span>
-                                ) : null}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* ✅ action bar: ยืนยันทีเดียว */}
-              {pendingCount > 0 ? (
-                <div className="rounded-2xl bg-amber-400/10 p-3 ring-1 ring-amber-300/20">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-amber-100">
-                      มีการเปลี่ยนแปลง {pendingCount} รายการ (ยังไม่บันทึก)
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleResetChecklistChanges}
-                        disabled={checklistSaving}
-                        className="rounded-xl bg-white/10 px-3 py-2 text-xs text-white/85 hover:bg-white/15 disabled:opacity-60"
-                      >
-                        ยกเลิกการเปลี่ยนแปลง
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleConfirmChecklistUpdate}
-                        disabled={checklistSaving}
-                        className="rounded-xl bg-emerald-500/80 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
-                      >
-                        {checklistSaving ? "กำลังอัปเดต..." : "ยืนยันการอัปเดต"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {checklistErr ? (
-                    <div className="mt-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
-                      {checklistErr}
-                    </div>
-                  ) : null}
-                </div>
-              ) : checklistErr ? (
-                <div className="rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
-                  {checklistErr}
-                </div>
-              ) : null}
-            </section>
-          </div>
-
-          {/* right */}
-          <aside className="space-y-3">
-            <div className="rounded-2xl bg-white/5 p-4">
-              <div className="text-sm font-semibold text-white/90">การทำงาน</div>
-
-              <div className="mt-3 space-y-3">
-                <a
-                  href={card.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
-                >
-                  เปิดใน Trello
-                </a>
-
-                {!editing ? (
-                  <button
-                    type="button"
-                    onClick={() => setEditing(true)}
-                    className="w-full rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
-                  >
-                    แก้ไขการ์ด
-                  </button>
+        {/* ✅ Content เลื่อนเฉพาะส่วนนี้ */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-1 gap-6 px-6 py-6 md:grid-cols-[1fr_320px]">
+            <div className="space-y-6">
+              <section className="space-y-2">
+                <div className="text-sm font-semibold text-white/90">สมาชิก</div>
+                {selectedMembers.length === 0 ? (
+                  <div className="text-sm text-white/60">-</div>
                 ) : (
-                  <div className="space-y-3">
-                    {/* phase picker */}
-                    <div className="space-y-1">
-                      <div className="text-xs text-white/60">Phase</div>
-                      <select
-                        value={form.phaseId}
-                        onChange={(e) =>
-                          setForm((p) => ({ ...p, phaseId: e.target.value }))
-                        }
-                        className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                        disabled={saving}
+                  <div className="flex flex-wrap gap-2">
+                    {selectedMembers.map((m) => (
+                      <span
+                        key={m.id}
+                        className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-sm"
                       >
-                        <option value="" className="text-slate-900">
-                          (ไม่อยู่ใน Phase)
-                        </option>
-                        {(phases ?? []).map((p) => (
-                          <option key={p.id} value={p.id} className="text-slate-900">
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* list */}
-                    <div className="space-y-1">
-                      <div className="text-xs text-white/60">คอลัมน์ (List)</div>
-                      <select
-                        value={form.listId}
-                        onChange={(e) =>
-                          setForm((p) => ({ ...p, listId: e.target.value }))
-                        }
-                        className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
-                        disabled={saving}
-                      >
-                        {(lists ?? []).filter((l) => !l.closed).map((l) => (
-                          <option key={l.id} value={l.id} className="text-slate-900">
-                            {l.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* members picker */}
-                    <div className="space-y-1">
-                      <div className="text-xs text-white/60">Assignees</div>
-                      <div className="max-h-40 overflow-y-auto rounded-xl bg-white/5 p-2 ring-1 ring-white/10">
-                        {(members ?? []).length === 0 ? (
-                          <div className="px-2 py-2 text-xs text-white/50">ไม่มีสมาชิก</div>
-                        ) : (
-                          (members ?? []).map((m) => {
-                            const checked = form.memberIds.includes(m.id);
-                            return (
-                              <label
-                                key={m.id}
-                                className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/5"
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 rounded border-white/20 bg-white/10"
-                                  checked={checked}
-                                  onChange={() => toggleMember(m.id)}
-                                  disabled={saving}
-                                />
-                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold">
-                                  {(m.initials ||
-                                    m.fullName?.[0] ||
-                                    m.username?.[0] ||
-                                    "?")
-                                    .toString()
-                                    .toUpperCase()}
-                                </span>
-                                <span className="text-sm text-white/85">
-                                  {m.fullName || m.username}
-                                </span>
-                              </label>
-                            );
-                          })
-                        )}
-                      </div>
-                    </div>
-
-                    {/* dates */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <div className="text-xs text-white/60">Start</div>
-                        <AppDatePicker
-                          value={form.startDate}
-                          onChange={(d) => setForm((p) => ({ ...p, startDate: d }))}
-                          placeholder="เลือกวันที่เริ่ม"
-                          disabled={saving}
-                        />
-                      </div>
-
-                      <div className="space-y-1">
-                        <div className="text-xs text-white/60">Due</div>
-                        <AppDatePicker
-                          value={form.dueDate}
-                          onChange={(d) => setForm((p) => ({ ...p, dueDate: d }))}
-                          placeholder="เลือกวันที่สิ้นสุด"
-                          disabled={saving}
-                        />
-                      </div>
-                    </div>
-
-                    {err ? (
-                      <div className="rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
-                        {err}
-                      </div>
-                    ) : null}
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(false)}
-                        className="flex-1 rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
-                        disabled={saving}
-                      >
-                        ยกเลิก
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSave}
-                        className="flex-1 rounded-xl bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
-                        disabled={saving || !canSave}
-                      >
-                        {saving ? "Saving..." : "บันทึก"}
-                      </button>
-                    </div>
-
-                    <div className="text-[11px] text-white/40">
-                      * ตอนนี้ backend ยังไม่มี unassign → เอาสมาชิกออกอาจยังไม่ sync แต่จะไม่ทำให้บันทึกล้ม
-                    </div>
+                        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/15 text-xs font-semibold">
+                          {(m.initials || m.fullName?.[0] || m.username?.[0] || "?")
+                            .toString()
+                            .toUpperCase()}
+                        </span>
+                        <span className="text-white/90">{m.fullName || m.username}</span>
+                      </span>
+                    ))}
                   </div>
                 )}
-              </div>
+              </section>
+
+              <section className="space-y-2">
+                <div className="text-sm font-semibold text-white/90">คำอธิบาย</div>
+                {!editing ? (
+                  <div className="rounded-2xl bg-white/5 p-4 text-sm text-white/80 whitespace-pre-wrap">
+                    {shownDesc ? shownDesc : "-"}
+                  </div>
+                ) : (
+                  <textarea
+                    value={form.desc}
+                    onChange={(e) => setForm((p) => ({ ...p, desc: e.target.value }))}
+                    rows={5}
+                    className="w-full rounded-2xl bg-white/10 p-4 text-sm text-white/90 outline-none ring-1 ring-white/10 focus:ring-white/30"
+                    placeholder="รายละเอียด..."
+                    disabled={saving}
+                  />
+                )}
+              </section>
+
+              {/* ✅ CHECKLIST */}
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-white/90">
+                    ขั้นตอนการทำงาน (Checklist)
+                  </div>
+                  <div className="text-xs text-white/60">
+                    {progress}% ({card.badges?.checkItemsChecked ?? 0}/
+                    {card.badges?.checkItems ?? 0})
+                  </div>
+                </div>
+
+                <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-emerald-400/80 transition-all"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+
+                {(card.checklists ?? []).length === 0 ? (
+                  <div className="text-sm text-white/60">-</div>
+                ) : (
+                  <div className="space-y-3">
+                    {card.checklists.map((cl) => (
+                      <div key={cl.id} className="rounded-2xl bg-white/5 p-4">
+                        <div className="text-sm font-semibold text-white/90">
+                          {cl.name || "Checklist"}
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                          {(cl.checkItems ?? []).map((it) => {
+                            const draftState =
+                              checklistDraft[it.id] ??
+                              (it.state === "complete" ? "complete" : "incomplete");
+
+                            const done = draftState === "complete";
+                            const orig = checklistOriginalRef.current[it.id];
+                            const dirty = orig ? orig !== draftState : false;
+
+                            return (
+                              <button
+                                key={it.id}
+                                type="button"
+                                onClick={() => handleToggleChecklistDraft(it.id)}
+                                disabled={checklistSaving}
+                                className={[
+                                  "w-full text-left flex items-start gap-3 rounded-xl px-2 py-1",
+                                  "hover:bg-white/5 transition",
+                                  checklistSaving ? "opacity-60 cursor-not-allowed" : "",
+                                ].join(" ")}
+                              >
+                                <span
+                                  className={[
+                                    "mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded border",
+                                    done
+                                      ? "border-emerald-300/50 bg-emerald-400/20"
+                                      : "border-white/20 bg-white/5",
+                                  ].join(" ")}
+                                  aria-hidden
+                                >
+                                  {done ? "✓" : ""}
+                                </span>
+
+                                <div
+                                  className={[
+                                    "text-sm flex items-center gap-2",
+                                    done ? "text-white/70 line-through" : "text-white/85",
+                                  ].join(" ")}
+                                >
+                                  <span>{it.name}</span>
+                                  {dirty ? (
+                                    <span className="text-[11px] rounded-full bg-amber-400/15 px-2 py-0.5 text-amber-100 ring-1 ring-amber-300/20">
+                                      ยังไม่บันทึก
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* ✅ action bar: ยืนยันทีเดียว */}
+                {pendingCount > 0 ? (
+                  <div className="rounded-2xl bg-amber-400/10 p-3 ring-1 ring-amber-300/20">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs text-amber-100">
+                        มีการเปลี่ยนแปลง {pendingCount} รายการ (ยังไม่บันทึก)
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleResetChecklistChanges}
+                          disabled={checklistSaving}
+                          className="rounded-xl bg-white/10 px-3 py-2 text-xs text-white/85 hover:bg-white/15 disabled:opacity-60"
+                        >
+                          ยกเลิกการเปลี่ยนแปลง
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleConfirmChecklistUpdate}
+                          disabled={checklistSaving}
+                          className="rounded-xl bg-emerald-500/80 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                        >
+                          {checklistSaving ? "กำลังอัปเดต..." : "ยืนยันการอัปเดต"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {checklistErr ? (
+                      <div className="mt-2 rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
+                        {checklistErr}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : checklistErr ? (
+                  <div className="rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
+                    {checklistErr}
+                  </div>
+                ) : null}
+              </section>
             </div>
-          </aside>
+
+            {/* right */}
+            <aside className="space-y-3">
+              <div className="rounded-2xl bg-white/5 p-4">
+                <div className="text-sm font-semibold text-white/90">การทำงาน</div>
+
+                <div className="mt-3 space-y-3">
+                  <a
+                    href={card.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
+                  >
+                    เปิดใน Trello
+                  </a>
+
+                  {!editing ? (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(true)}
+                      className="w-full rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
+                    >
+                      แก้ไขการ์ด
+                    </button>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* phase picker */}
+                      <div className="space-y-1">
+                        <div className="text-xs text-white/60">Phase</div>
+                        <select
+                          value={form.phaseId}
+                          onChange={(e) =>
+                            setForm((p) => ({ ...p, phaseId: e.target.value }))
+                          }
+                          className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                          disabled={saving}
+                        >
+                          <option value="" className="text-slate-900">
+                            (ไม่อยู่ใน Phase)
+                          </option>
+                          {(phases ?? []).map((p) => (
+                            <option key={p.id} value={p.id} className="text-slate-900">
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* list */}
+                      <div className="space-y-1">
+                        <div className="text-xs text-white/60">คอลัมน์ (List)</div>
+                        <select
+                          value={form.listId}
+                          onChange={(e) =>
+                            setForm((p) => ({ ...p, listId: e.target.value }))
+                          }
+                          className="w-full rounded-xl bg-white/10 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10"
+                          disabled={saving}
+                        >
+                          {(lists ?? []).filter((l) => !l.closed).map((l) => (
+                            <option key={l.id} value={l.id} className="text-slate-900">
+                              {l.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* members picker */}
+                      <div className="space-y-1">
+                        <div className="text-xs text-white/60">Assignees</div>
+                        <div className="max-h-40 overflow-y-auto rounded-xl bg-white/5 p-2 ring-1 ring-white/10">
+                          {(members ?? []).length === 0 ? (
+                            <div className="px-2 py-2 text-xs text-white/50">
+                              ไม่มีสมาชิก
+                            </div>
+                          ) : (
+                            (members ?? []).map((m) => {
+                              const checked = form.memberIds.includes(m.id);
+                              return (
+                                <label
+                                  key={m.id}
+                                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 hover:bg-white/5"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="h-4 w-4 rounded border-white/20 bg-white/10"
+                                    checked={checked}
+                                    onChange={() => toggleMember(m.id)}
+                                    disabled={saving}
+                                  />
+                                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-[11px] font-semibold">
+                                    {(m.initials ||
+                                      m.fullName?.[0] ||
+                                      m.username?.[0] ||
+                                      "?")
+                                      .toString()
+                                      .toUpperCase()}
+                                  </span>
+                                  <span className="text-sm text-white/85">
+                                    {m.fullName || m.username}
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* dates */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <div className="text-xs text-white/60">Start</div>
+                          <AppDatePicker
+                            value={form.startDate}
+                            onChange={(d) => setForm((p) => ({ ...p, startDate: d }))}
+                            placeholder="เลือกวันที่เริ่ม"
+                            disabled={saving}
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-xs text-white/60">Due</div>
+                          <AppDatePicker
+                            value={form.dueDate}
+                            onChange={(d) => setForm((p) => ({ ...p, dueDate: d }))}
+                            placeholder="เลือกวันที่สิ้นสุด"
+                            disabled={saving}
+                          />
+                        </div>
+                      </div>
+
+                      {err ? (
+                        <div className="rounded-xl bg-red-500/15 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/20">
+                          {err}
+                        </div>
+                      ) : null}
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(false)}
+                          className="flex-1 rounded-xl bg-white/10 px-4 py-2 text-sm text-white/85 hover:bg-white/15"
+                          disabled={saving}
+                        >
+                          ยกเลิก
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSave}
+                          className="flex-1 rounded-xl bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                          disabled={saving || !canSave}
+                        >
+                          {saving ? "Saving..." : "บันทึก"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </aside>
+          </div>
         </div>
       </div>
     </div>
